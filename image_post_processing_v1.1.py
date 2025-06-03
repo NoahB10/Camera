@@ -64,7 +64,9 @@ class DualImagePostProcessor:
         self.apply_cropping = True
         self.enable_distortion_correction = True
         self.apply_left_rotation = True  # New flag for left image rotation
+        self.apply_right_rotation = False  # New flag for right image rotation
         self.left_rotation_angle = -1.5  # Rotation angle in degrees
+        self.right_rotation_angle = 0.0  # Rotation angle in degrees
         self.jpeg_quality = 95
         self.output_format = 'JPEG'  # 'JPEG', 'TIFF', 'PNG'
         self.save_combined = True  # Save side-by-side combined image
@@ -73,18 +75,47 @@ class DualImagePostProcessor:
         # Load saved coefficients if available
         self.load_distortion_coefficients()
 
-    def load_distortion_coefficients(self):
+    def load_distortion_coefficients(self, filepath=None):
         """Load distortion correction coefficients from saved file"""
-        coeff_file = 'distortion_coefficients.json'
+        if filepath is None:
+            coeff_file = 'distortion_coefficients.json'
+        else:
+            coeff_file = filepath
+            
         if os.path.exists(coeff_file):
             try:
                 with open(coeff_file, 'r') as f:
                     saved_params = json.load(f)
-                    self.distortion_params.update(saved_params)
-                    print("[SUCCESS] Loaded distortion coefficients from saved file")
+                    
+                    # Update distortion parameters
+                    for cam in ['cam0', 'cam1']:
+                        if cam in saved_params:
+                            if cam not in self.distortion_params:
+                                self.distortion_params[cam] = {}
+                            
+                            # Update distortion coefficients
+                            for key in ['xcenter', 'ycenter', 'coeffs']:
+                                if key in saved_params[cam]:
+                                    self.distortion_params[cam][key] = saved_params[cam][key]
+                            
+                            # Update crop parameters if present
+                            if 'crop_params' in saved_params[cam]:
+                                if cam not in self.crop_params:
+                                    self.crop_params[cam] = {}
+                                self.crop_params[cam].update(saved_params[cam]['crop_params'])
+                    
+                    print(f"[SUCCESS] Loaded distortion coefficients from {coeff_file}")
+                    return True
             except Exception as e:
-                print(f"[WARNING] Failed to load saved coefficients: {e}")
+                print(f"[WARNING] Failed to load coefficients from {coeff_file}: {e}")
                 print("[INFO] Using default distortion coefficients")
+                return False
+        else:
+            if filepath is None:
+                print("[INFO] No default coefficients file found, using built-in defaults")
+            else:
+                print(f"[WARNING] Coefficients file not found: {coeff_file}")
+            return False
 
     def load_dng_image(self, filepath):
         """Load DNG image using rawpy with improved approach"""
@@ -207,6 +238,31 @@ class DualImagePostProcessor:
             print(f"[ERROR] Left image rotation failed: {e}")
             return image
 
+    def rotate_right_image(self, image):
+        """Rotate the right image by the specified angle"""
+        if not self.apply_right_rotation:
+            return image
+            
+        try:
+            # Get image dimensions
+            height, width = image.shape[:2]
+            
+            # Calculate rotation matrix
+            center = (width // 2, height // 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, self.right_rotation_angle, 1.0)
+            
+            # Apply rotation
+            rotated = cv2.warpAffine(image, rotation_matrix, (width, height), 
+                                   flags=cv2.INTER_LINEAR, 
+                                   borderMode=cv2.BORDER_REFLECT_101)
+            
+            print(f"[INFO] Applied {self.right_rotation_angle}° rotation to right image")
+            return rotated
+            
+        except Exception as e:
+            print(f"[ERROR] Right image rotation failed: {e}")
+            return image
+
     def save_processed_image(self, image, output_path, format_type=None):
         """Save processed image in specified format with improved TIFF handling"""
         if format_type is None:
@@ -325,6 +381,8 @@ class DualImagePostProcessor:
             right_processed = self.crop_image(right_processed, 'cam1')
         if self.enable_distortion_correction:
             right_processed = self.apply_distortion_correction(right_processed, 'cam1')
+        if self.apply_right_rotation:
+            right_processed = self.rotate_right_image(right_processed)
         
         # Generate base filename if not provided
         if base_name is None:
@@ -484,40 +542,95 @@ class DualImagePostProcessor:
         ttk.Checkbutton(options_frame, text="Apply Left Image Rotation", 
                        variable=self.left_rotation_var).grid(row=2, column=0, sticky=tk.W)
         
+        # Right rotation checkbox
+        self.right_rotation_var = tk.BooleanVar(value=self.apply_right_rotation)
+        ttk.Checkbutton(options_frame, text="Apply Right Image Rotation", 
+                       variable=self.right_rotation_var).grid(row=3, column=0, sticky=tk.W)
+        
         # Output options
         self.individual_var = tk.BooleanVar(value=self.save_individual)
         ttk.Checkbutton(options_frame, text="Save Individual Images", 
-                       variable=self.individual_var).grid(row=3, column=0, sticky=tk.W)
+                       variable=self.individual_var).grid(row=4, column=0, sticky=tk.W)
         
         self.combined_var = tk.BooleanVar(value=self.save_combined)
         ttk.Checkbutton(options_frame, text="Save Combined Side-by-Side Image", 
-                       variable=self.combined_var).grid(row=4, column=0, sticky=tk.W)
+                       variable=self.combined_var).grid(row=5, column=0, sticky=tk.W)
         
         # Output format
-        ttk.Label(options_frame, text="Output Format:").grid(row=5, column=0, sticky=tk.W, pady=(10, 0))
+        ttk.Label(options_frame, text="Output Format:").grid(row=6, column=0, sticky=tk.W, pady=(10, 0))
         self.format_var = tk.StringVar(value=self.output_format)
         format_combo = ttk.Combobox(options_frame, textvariable=self.format_var, 
                                    values=['JPEG', 'TIFF', 'PNG'], state='readonly', width=10)
-        format_combo.grid(row=5, column=1, sticky=tk.W, padx=(10, 0), pady=(10, 0))
+        format_combo.grid(row=6, column=1, sticky=tk.W, padx=(10, 0), pady=(10, 0))
         
         # JPEG quality
-        ttk.Label(options_frame, text="JPEG Quality:").grid(row=6, column=0, sticky=tk.W, pady=(5, 0))
+        ttk.Label(options_frame, text="JPEG Quality:").grid(row=7, column=0, sticky=tk.W, pady=(5, 0))
         self.quality_var = tk.IntVar(value=self.jpeg_quality)
         quality_scale = ttk.Scale(options_frame, from_=50, to=100, variable=self.quality_var, 
                                  orient=tk.HORIZONTAL, length=200)
-        quality_scale.grid(row=6, column=1, sticky=tk.W, padx=(10, 0), pady=(5, 0))
+        quality_scale.grid(row=7, column=1, sticky=tk.W, padx=(10, 0), pady=(5, 0))
         
         # Quality label
         self.quality_label = ttk.Label(options_frame, text=f"{self.jpeg_quality}%")
-        self.quality_label.grid(row=6, column=2, sticky=tk.W, padx=(5, 0), pady=(5, 0))
+        self.quality_label.grid(row=7, column=2, sticky=tk.W, padx=(5, 0), pady=(5, 0))
         
         def update_quality_label(*args):
             self.quality_label.config(text=f"{self.quality_var.get()}%")
         quality_scale.config(command=update_quality_label)
         
+        # Rotation angles frame
+        rotation_frame = ttk.LabelFrame(main_frame, text="Rotation Angles (degrees)", padding="10")
+        rotation_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Left rotation angle
+        ttk.Label(rotation_frame, text="Left Image Angle:").grid(row=0, column=0, sticky=tk.W)
+        self.left_angle_var = tk.DoubleVar(value=self.left_rotation_angle)
+        left_angle_entry = ttk.Entry(rotation_frame, textvariable=self.left_angle_var, width=10)
+        left_angle_entry.grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        
+        # Right rotation angle
+        ttk.Label(rotation_frame, text="Right Image Angle:").grid(row=0, column=2, sticky=tk.W, padx=(20, 0))
+        self.right_angle_var = tk.DoubleVar(value=self.right_rotation_angle)
+        right_angle_entry = ttk.Entry(rotation_frame, textvariable=self.right_angle_var, width=10)
+        right_angle_entry.grid(row=0, column=3, sticky=tk.W, padx=(10, 0))
+        
+        # Cropping parameters frame
+        crop_frame = ttk.LabelFrame(main_frame, text="Cropping Parameters", padding="10")
+        crop_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        
+        # Left camera crop parameters
+        ttk.Label(crop_frame, text="Left Camera (cam0):").grid(row=0, column=0, sticky=tk.W, columnspan=4)
+        
+        ttk.Label(crop_frame, text="Width:").grid(row=1, column=0, sticky=tk.W, padx=(20, 0))
+        self.left_width_var = tk.IntVar(value=self.crop_params['cam0']['width'])
+        ttk.Entry(crop_frame, textvariable=self.left_width_var, width=8).grid(row=1, column=1, sticky=tk.W, padx=(5, 0))
+        
+        ttk.Label(crop_frame, text="Start X:").grid(row=1, column=2, sticky=tk.W, padx=(15, 0))
+        self.left_start_x_var = tk.IntVar(value=self.crop_params['cam0']['start_x'])
+        ttk.Entry(crop_frame, textvariable=self.left_start_x_var, width=8).grid(row=1, column=3, sticky=tk.W, padx=(5, 0))
+        
+        ttk.Label(crop_frame, text="Height:").grid(row=1, column=4, sticky=tk.W, padx=(15, 0))
+        self.left_height_var = tk.IntVar(value=self.crop_params['cam0']['height'])
+        ttk.Entry(crop_frame, textvariable=self.left_height_var, width=8).grid(row=1, column=5, sticky=tk.W, padx=(5, 0))
+        
+        # Right camera crop parameters
+        ttk.Label(crop_frame, text="Right Camera (cam1):").grid(row=2, column=0, sticky=tk.W, columnspan=4, pady=(10, 0))
+        
+        ttk.Label(crop_frame, text="Width:").grid(row=3, column=0, sticky=tk.W, padx=(20, 0))
+        self.right_width_var = tk.IntVar(value=self.crop_params['cam1']['width'])
+        ttk.Entry(crop_frame, textvariable=self.right_width_var, width=8).grid(row=3, column=1, sticky=tk.W, padx=(5, 0))
+        
+        ttk.Label(crop_frame, text="Start X:").grid(row=3, column=2, sticky=tk.W, padx=(15, 0))
+        self.right_start_x_var = tk.IntVar(value=self.crop_params['cam1']['start_x'])
+        ttk.Entry(crop_frame, textvariable=self.right_start_x_var, width=8).grid(row=3, column=3, sticky=tk.W, padx=(5, 0))
+        
+        ttk.Label(crop_frame, text="Height:").grid(row=3, column=4, sticky=tk.W, padx=(15, 0))
+        self.right_height_var = tk.IntVar(value=self.crop_params['cam1']['height'])
+        ttk.Entry(crop_frame, textvariable=self.right_height_var, width=8).grid(row=3, column=5, sticky=tk.W, padx=(5, 0))
+        
         # File selection frame
         file_frame = ttk.LabelFrame(main_frame, text="File Selection", padding="10")
-        file_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        file_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Dual image processing
         ttk.Button(file_frame, text="Process Left + Right DNG Pair", 
@@ -533,7 +646,7 @@ class DualImagePostProcessor:
         
         # Current parameters display
         params_frame = ttk.LabelFrame(main_frame, text="Current Parameters", padding="10")
-        params_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
+        params_frame.grid(row=4, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 10))
         
         # Create text widget for parameters
         self.params_text = tk.Text(params_frame, height=10, width=70)
@@ -549,7 +662,7 @@ class DualImagePostProcessor:
         
         # Buttons frame
         buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.grid(row=3, column=0, columnspan=2, pady=(10, 0))
+        buttons_frame.grid(row=5, column=0, columnspan=2, pady=(10, 0))
         
         ttk.Button(buttons_frame, text="Reload Distortion Coefficients", 
                   command=self.reload_coefficients).pack(side=tk.LEFT, padx=(0, 10))
@@ -577,6 +690,11 @@ class DualImagePostProcessor:
                 cam_label = "Left" if cam == "cam0" else "Right"
                 self.params_text.insert(tk.END, f"  {cam} ({cam_label}): {params['width']}x{params['height']} @ ({params['start_x']},0)\n")
             
+            # Rotation parameters
+            self.params_text.insert(tk.END, "\nRotation Parameters:\n")
+            self.params_text.insert(tk.END, f"  Left Image (cam0): {self.left_rotation_angle}°\n")
+            self.params_text.insert(tk.END, f"  Right Image (cam1): {self.right_rotation_angle}°\n")
+            
             self.params_text.insert(tk.END, "\nDistortion Parameters:\n")
             for cam, params in self.distortion_params.items():
                 cam_label = "Left" if cam == "cam0" else "Right"
@@ -590,10 +708,23 @@ class DualImagePostProcessor:
         self.apply_cropping = self.crop_var.get()
         self.enable_distortion_correction = self.distortion_var.get()
         self.apply_left_rotation = self.left_rotation_var.get()
+        self.apply_right_rotation = self.right_rotation_var.get()
         self.save_individual = self.individual_var.get()
         self.save_combined = self.combined_var.get()
         self.output_format = self.format_var.get()
         self.jpeg_quality = self.quality_var.get()
+        
+        # Update rotation angles
+        self.left_rotation_angle = self.left_angle_var.get()
+        self.right_rotation_angle = self.right_angle_var.get()
+        
+        # Update crop parameters
+        self.crop_params['cam0']['width'] = self.left_width_var.get()
+        self.crop_params['cam0']['start_x'] = self.left_start_x_var.get()
+        self.crop_params['cam0']['height'] = self.left_height_var.get()
+        self.crop_params['cam1']['width'] = self.right_width_var.get()
+        self.crop_params['cam1']['start_x'] = self.right_start_x_var.get()
+        self.crop_params['cam1']['height'] = self.right_height_var.get()
         
         if not self.save_individual and not self.save_combined:
             messagebox.showerror("Error", "Please select at least one output option (Individual or Combined)")
@@ -636,8 +767,21 @@ class DualImagePostProcessor:
         self.apply_cropping = self.crop_var.get()
         self.enable_distortion_correction = self.distortion_var.get()
         self.apply_left_rotation = self.left_rotation_var.get()
+        self.apply_right_rotation = self.right_rotation_var.get()
         self.output_format = self.format_var.get()
         self.jpeg_quality = self.quality_var.get()
+        
+        # Update rotation angles
+        self.left_rotation_angle = self.left_angle_var.get()
+        self.right_rotation_angle = self.right_angle_var.get()
+        
+        # Update crop parameters
+        self.crop_params['cam0']['width'] = self.left_width_var.get()
+        self.crop_params['cam0']['start_x'] = self.left_start_x_var.get()
+        self.crop_params['cam0']['height'] = self.left_height_var.get()
+        self.crop_params['cam1']['width'] = self.right_width_var.get()
+        self.crop_params['cam1']['start_x'] = self.right_start_x_var.get()
+        self.crop_params['cam1']['height'] = self.right_height_var.get()
         
         # Select input file
         input_file = filedialog.askopenfilename(
@@ -662,6 +806,8 @@ class DualImagePostProcessor:
         if self.enable_distortion_correction:
             suffixes.append("corrected")
         if self.apply_left_rotation and cam_name == 'cam0':
+            suffixes.append("rotated")
+        if self.apply_right_rotation and cam_name == 'cam1':
             suffixes.append("rotated")
         
         suffix_str = "_" + "_".join(suffixes) if suffixes else "_processed"
@@ -712,6 +858,10 @@ class DualImagePostProcessor:
         if self.apply_left_rotation and cam_name == 'cam0':
             processed_image = self.rotate_left_image(processed_image)
         
+        # Apply right image rotation if this is cam1
+        if self.apply_right_rotation and cam_name == 'cam1':
+            processed_image = self.rotate_right_image(processed_image)
+        
         # Save the processed image
         success = self.save_processed_image(processed_image, output_path)
         
@@ -727,10 +877,23 @@ class DualImagePostProcessor:
         self.apply_cropping = self.crop_var.get()
         self.enable_distortion_correction = self.distortion_var.get()
         self.apply_left_rotation = self.left_rotation_var.get()
+        self.apply_right_rotation = self.right_rotation_var.get()
         self.save_individual = self.individual_var.get()
         self.save_combined = self.combined_var.get()
         self.output_format = self.format_var.get()
         self.jpeg_quality = self.quality_var.get()
+        
+        # Update rotation angles
+        self.left_rotation_angle = self.left_angle_var.get()
+        self.right_rotation_angle = self.right_angle_var.get()
+        
+        # Update crop parameters
+        self.crop_params['cam0']['width'] = self.left_width_var.get()
+        self.crop_params['cam0']['start_x'] = self.left_start_x_var.get()
+        self.crop_params['cam0']['height'] = self.left_height_var.get()
+        self.crop_params['cam1']['width'] = self.right_width_var.get()
+        self.crop_params['cam1']['start_x'] = self.right_start_x_var.get()
+        self.crop_params['cam1']['height'] = self.right_height_var.get()
         
         if not self.save_individual and not self.save_combined:
             messagebox.showerror("Error", "Please select at least one output option (Individual or Combined)")
@@ -752,9 +915,36 @@ class DualImagePostProcessor:
     
     def reload_coefficients(self):
         """Reload distortion coefficients and update display"""
-        self.load_distortion_coefficients()
-        self.update_params_display()
-        messagebox.showinfo("Coefficients Reloaded", "Distortion coefficients have been reloaded from file.")
+        # Open file dialog to select coefficients file
+        coeff_file = filedialog.askopenfilename(
+            title="Select Distortion Coefficients JSON File",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not coeff_file:
+            return
+        
+        # Try to load the coefficients
+        success = self.load_distortion_coefficients(coeff_file)
+        
+        if success:
+            # Update GUI values with loaded parameters
+            if hasattr(self, 'left_width_var'):
+                self.left_width_var.set(self.crop_params['cam0']['width'])
+                self.left_start_x_var.set(self.crop_params['cam0']['start_x'])
+                self.left_height_var.set(self.crop_params['cam0']['height'])
+                self.right_width_var.set(self.crop_params['cam1']['width'])
+                self.right_start_x_var.set(self.crop_params['cam1']['start_x'])
+                self.right_height_var.set(self.crop_params['cam1']['height'])
+            
+            # Update parameters display
+            self.update_params_display()
+            messagebox.showinfo("Success", f"Distortion coefficients and crop parameters loaded successfully from:\n{os.path.basename(coeff_file)}")
+        else:
+            messagebox.showerror("Error", f"Failed to load coefficients from:\n{os.path.basename(coeff_file)}\n\nCheck console for details.")
 
 def main():
     parser = argparse.ArgumentParser(description="Post-process DNG image pairs from IMX708 dual camera system")
@@ -783,6 +973,7 @@ def main():
         processor.enable_distortion_correction = False
     if args.no_rotation:
         processor.apply_left_rotation = False
+        processor.apply_right_rotation = False
     if args.no_individual:
         processor.save_individual = False
     if args.no_combined:

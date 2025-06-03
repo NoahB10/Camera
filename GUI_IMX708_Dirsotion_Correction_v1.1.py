@@ -51,8 +51,8 @@ class DualIMX708Viewer:
 
         # Cropping parameters
         self.crop_params = {
-            'cam0': {'width': 2200, 'start_x': 1230, 'height': 2592},
-            'cam1': {'width': 2155, 'start_x': 1336, 'height': 2592}
+            'cam0': {'width': 2070, 'start_x': 1260, 'height': 2592},
+            'cam1': {'width': 2050, 'start_x': 1400, 'height': 2592}
         }
 
         # Distortion correction parameters (default values - will be loaded from files)
@@ -74,6 +74,12 @@ class DualIMX708Viewer:
         self.enable_distortion_correction = True
         self.apply_left_rotation = True  # Always rotate left image
         self.left_rotation_angle = -2  # Rotation angle in degrees
+        
+        # Distortion correction padding (camera-specific)
+        self.left_top_padding = 198  # pixels to pad at the top for left image (cam0)
+        self.left_bottom_padding = 42  # pixels to pad at the bottom for left image (cam0)
+        self.right_top_padding = 150  # pixels to pad at the top for right image (cam1)
+        self.right_bottom_padding = 50  # pixels to pad at the bottom for right image (cam1)
 
         # Default/base values
         self.defaults = {
@@ -182,8 +188,8 @@ class DualIMX708Viewer:
         crop_info_frame = ttk.LabelFrame(processing_frame, text="Crop Parameters")
         crop_info_frame.pack(fill=tk.X, padx=5, pady=5)
         
-        ttk.Label(crop_info_frame, text="Cam0: 2161x2592 @ (1284,0)").pack(anchor=tk.W, padx=5)
-        ttk.Label(crop_info_frame, text="Cam1: 2088x2592 @ (1336,0)").pack(anchor=tk.W, padx=5)
+        ttk.Label(crop_info_frame, text="Cam0: 2070x2592 @ (1260,0)").pack(anchor=tk.W, padx=5)
+        ttk.Label(crop_info_frame, text="Cam1: 2050x2592 @ (1400,0)").pack(anchor=tk.W, padx=5)
 
     def apply_settings(self):
         settings = {
@@ -575,7 +581,7 @@ class DualIMX708Viewer:
         return cropped
 
     def apply_distortion_correction(self, image, cam_name):
-        """Apply distortion correction to the image"""
+        """Apply distortion correction to the image with camera-specific padding"""
         if not self.enable_distortion_correction:
             return image
             
@@ -589,6 +595,27 @@ class DualIMX708Viewer:
             original_dtype = image.dtype
             original_min = image.min()
             original_max = image.max()
+            original_height, original_width = image.shape[:2]
+            
+            # Get camera-specific padding values
+            if cam_name == 'cam0':  # Left camera
+                top_padding = self.left_top_padding
+                bottom_padding = self.left_bottom_padding
+            else:  # Right camera (cam1)
+                top_padding = self.right_top_padding
+                bottom_padding = self.right_bottom_padding
+            
+            # Calculate new output dimensions - add vertical padding
+            new_height = original_height + top_padding + bottom_padding
+            new_width = original_width  # Keep original width unchanged
+            
+            # Calculate offset to place the original image with padding
+            offset_x = 0  # No horizontal offset since width unchanged
+            offset_y = top_padding  # Vertical offset based on top padding
+            
+            # Adjust center coordinates - only adjust y-center
+            new_xcenter = xcenter  # Keep original x-center
+            new_ycenter = ycenter + offset_y
             
             # Convert to float for processing if needed
             if image.dtype != np.float64:
@@ -596,20 +623,26 @@ class DualIMX708Viewer:
             else:
                 image_float = image.copy()
             
+            # Create larger canvas and place original image with padding
             if image_float.ndim == 2:
                 # Grayscale image
-                corrected = post.unwarp_image_backward(image_float, xcenter, ycenter, coeffs)
+                padded_image = np.zeros((new_height, new_width), dtype=np.float64)
+                padded_image[offset_y:offset_y + original_height, offset_x:offset_x + original_width] = image_float
+                corrected = post.unwarp_image_backward(padded_image, new_xcenter, new_ycenter, coeffs)
             else:
                 # Multi-channel image
-                corrected = np.zeros_like(image_float)
+                padded_image = np.zeros((new_height, new_width, image_float.shape[2]), dtype=np.float64)
+                padded_image[offset_y:offset_y + original_height, offset_x:offset_x + original_width, :] = image_float
+                
+                corrected = np.zeros_like(padded_image)
                 for c in range(image_float.shape[2]):
-                    corrected[:, :, c] = post.unwarp_image_backward(image_float[:, :, c], xcenter, ycenter, coeffs)
+                    corrected[:, :, c] = post.unwarp_image_backward(padded_image[:, :, c], new_xcenter, new_ycenter, coeffs)
             
             # Handle potential NaN or infinite values
             corrected = np.nan_to_num(corrected, nan=0.0, posinf=original_max, neginf=0.0)
             
             # Clip to reasonable range based on original data
-            corrected = np.clip(corrected, 0, original_max * 1.1)  # Allow slight overflow
+            corrected = np.clip(corrected, 0, original_max)
             
             # Convert back to original data type
             if original_dtype == np.uint8:
@@ -620,6 +653,7 @@ class DualIMX708Viewer:
                 corrected = corrected.astype(original_dtype)
             
             print(f"[DEBUG] Distortion correction for {cam_name}: input range [{original_min}, {original_max}], output range [{corrected.min()}, {corrected.max()}]")
+            print(f"[DEBUG] Output size: {original_width}x{original_height} -> {new_width}x{new_height} (padding: {top_padding} top, {bottom_padding} bottom)")
             
             return corrected
             
