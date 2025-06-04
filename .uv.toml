@@ -1,0 +1,34 @@
+# UV configuration file for Dual IMX708 Camera Control
+
+# Global settings
+[tool.uv]
+# Use the system Python if available, otherwise install one
+python-preference = "system"
+
+# For Raspberry Pi, specify the index URL that includes ARM packages
+index-url = "https://pypi.org/simple"
+
+# Allow pre-release versions for newer packages
+prerelease = "if-necessary"
+
+# Use specific resolver strategies
+resolution = "highest"
+
+# Configure caching
+no-cache = false
+cache-dir = ".uv-cache"
+
+# Configure build settings
+native-tls = true
+no-build-isolation = false
+
+# For Raspberry Pi specific settings
+[tool.uv.sources]
+# If you need to use specific versions or sources for RPi
+# opencv-python = { url = "https://www.piwheels.org/simple/opencv-python/" }
+
+# Environment variables for building on Raspberry Pi
+[tool.uv.env]
+# Set environment variables for ARM compilation if needed
+# CFLAGS = "-march=armv8-a"
+# CXXFLAGS = "-march=armv8-a" 

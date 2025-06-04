@@ -1009,9 +1009,44 @@ class DualIMX708Viewer:
         self.apply_right_rotation = self.right_rotation_var.get()
         print(f"[INFO] Right image rotation {'enabled' if self.apply_right_rotation else 'disabled'}")
 
-if __name__ == "__main__":
-    viewer = DualIMX708Viewer()
+def main():
+    """Main entry point for the dual camera GUI application"""
     try:
+        print("Initializing Dual IMX708 Camera Control GUI v1.2...")
+        print("GUI will work with defaults if calibration files are not found.")
+        
+        # Check if we're running on a system with GUI support
+        try:
+            import tkinter as tk
+            root = tk.Tk()
+            root.withdraw()  # Hide the test window
+            root.destroy()
+        except Exception as e:
+            print(f"Error: GUI not supported on this system: {e}")
+            print("Make sure you have tkinter installed and X11 forwarding enabled if using SSH")
+            return 1
+        
+        viewer = DualIMX708Viewer()
+        print("Starting GUI main loop...")
         viewer.run()
+        return 0
+        
+    except KeyboardInterrupt:
+        print("\nApplication interrupted by user")
+        return 0
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return 1
     finally:
-        viewer.cleanup() 
+        try:
+            if 'viewer' in locals():
+                viewer.cleanup()
+        except:
+            pass
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main()) 

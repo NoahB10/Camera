@@ -1,0 +1,105 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dual-imx708-camera-control"
+version = "1.2.0"
+description = "Dual IMX708 Camera Control GUI with distortion and perspective correction"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Camera Control Team"}
+]
+keywords = ["camera", "raspberry-pi", "image-processing", "gui", "distortion-correction"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Multimedia :: Graphics :: Capture",
+]
+
+dependencies = [
+    # Core GUI and camera
+    "picamera2>=0.3.0",
+    
+    # Image processing
+    "opencv-python>=4.5.0",
+    "numpy>=1.20.0",
+    "Pillow>=9.0.0",
+    "imageio>=2.19.0",
+    "rawpy>=0.18.0",
+    
+    # Distortion correction
+    "discorpy>=1.5.0",
+    "scipy>=1.7.0",
+    "scikit-image>=0.18.0",
+    
+    # Data handling and visualization
+    "pandas>=1.3.0",
+    "matplotlib>=3.3.0",
+    
+    # Performance optimization (optional but recommended)
+    "numba>=0.56.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0",
+    "black>=22.0",
+    "isort>=5.0",
+    "flake8>=4.0",
+]
+
+rpi = [
+    # Additional Raspberry Pi specific dependencies if needed
+    "RPi.GPIO>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/dual-imx708-camera-control"
+Repository = "https://github.com/yourusername/dual-imx708-camera-control"
+Issues = "https://github.com/yourusername/dual-imx708-camera-control/issues"
+
+[project.scripts]
+dual-camera-gui = "GUI_IMX708_Dirsotion_Correction_v1_2:main"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=6.0",
+    "black>=22.0",
+    "isort>=5.0",
+    "flake8>=4.0",
+]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88 
