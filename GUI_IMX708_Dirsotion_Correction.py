@@ -66,7 +66,7 @@ class DualIMX708Viewer:
         self.apply_cropping = True
         self.enable_distortion_correction = True
         self.apply_left_rotation = True  # New flag for left image rotation
-        self.left_rotation_angle = -2  # Rotation angle in degrees
+        self.left_rotation_angle = -1.5  # Rotation angle in degrees
 
         # Default/base values
         self.defaults = {
@@ -254,7 +254,7 @@ class DualIMX708Viewer:
                             success_count += 1
                         else:
                             print(f"[ERROR] Failed to save combined TIFF")
-                    else:
+        else:
                         print(f"[ERROR] Failed to create combined image")
                         
                 except Exception as e:
@@ -264,7 +264,7 @@ class DualIMX708Viewer:
 
             if success_count > 0:
                 print(f"\n[SUCCESS] Save operation complete! {success_count} files saved.")
-            else:
+        else:
                 print(f"\n[WARNING] No files were saved.")
 
         finally:
@@ -315,8 +315,8 @@ class DualIMX708Viewer:
         frame1 = self.cam1.capture_array()
 
         # Always apply processing for preview (cropping and correction)
-        frame0_display = self.crop_image(frame0, 'cam0')
-        frame1_display = self.crop_image(frame1, 'cam1')
+            frame0_display = self.crop_image(frame0, 'cam0')
+            frame1_display = self.crop_image(frame1, 'cam1')
 
         display0 = cv2.resize(frame0_display, (640, 480))
         display1 = cv2.resize(frame1_display, (640, 480))
@@ -631,7 +631,7 @@ class DualIMX708Viewer:
         """Rotate the left image by the specified angle"""
         if not self.apply_left_rotation:
             return image
-            
+
         try:
             # Get image dimensions
             height, width = image.shape[:2]
