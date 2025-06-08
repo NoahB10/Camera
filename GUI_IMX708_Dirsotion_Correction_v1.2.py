@@ -37,21 +37,14 @@ import imageio
 
 class DualIMX708Viewer:
     def __init__(self):
-        # Initialize both cameras
-        self.cam0 = Picamera2(0)
-        self.cam1 = Picamera2(1)
-
-        # Shared full-resolution raw configuration
-        self.camera_config = self.cam0.create_still_configuration(
-            raw={"size": (4608, 2592)},
-            controls={
-                "ExposureTime": 10000,
-                "AnalogueGain": 1.0
-            }
-        )
-
-        self.cam0.configure(self.camera_config)
-        self.cam1.configure(self.camera_config)
+        # Camera connection status
+        self.cam0_connected = False
+        self.cam1_connected = False
+        self.cam0 = None
+        self.cam1 = None
+        
+        # Initialize camera configuration template
+        self.camera_config = None
 
         # Cropping parameters (matching v1.3 defaults)
         self.crop_params = {
@@ -110,12 +103,91 @@ class DualIMX708Viewer:
             'Sharpness': {'value': self.defaults['Sharpness'], 'min': 0.0, 'max': 4.0}
         }
 
+        # Setup GUI first (before camera initialization)
         self.setup_gui()
-        self.cam0.start()
-        self.cam1.start()
-        time.sleep(2)
+        
+        # Load settings and calibration (non-blocking)
         self.load_settings()
         self.load_distortion_coefficients()
+        
+        # Try to initialize cameras (non-blocking)
+        self.initialize_cameras()
+
+    def initialize_cameras(self):
+        """Initialize cameras with error handling"""
+        print("Attempting to initialize cameras...")
+        
+        try:
+            # Try to initialize camera 0
+            try:
+                from picamera2 import Picamera2
+                self.cam0 = Picamera2(0)
+                
+                # Create shared full-resolution raw configuration
+                self.camera_config = self.cam0.create_still_configuration(
+                    raw={"size": (4608, 2592)},
+                    controls={
+                        "ExposureTime": 10000,
+                        "AnalogueGain": 1.0
+                    }
+                )
+                
+                self.cam0.configure(self.camera_config)
+                self.cam0.start()
+                self.cam0_connected = True
+                print("[SUCCESS] Camera 0 initialized and started")
+                
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize camera 0: {e}")
+                self.cam0_connected = False
+                self.cam0 = None
+
+            # Try to initialize camera 1
+            try:
+                if self.camera_config is not None:  # Only if cam0 succeeded
+                    self.cam1 = Picamera2(1)
+                    self.cam1.configure(self.camera_config)
+                    self.cam1.start()
+                    self.cam1_connected = True
+                    print("[SUCCESS] Camera 1 initialized and started")
+                else:
+                    # Try to create camera 1 independently
+                    self.cam1 = Picamera2(1)
+                    backup_config = self.cam1.create_still_configuration(
+                        raw={"size": (4608, 2592)},
+                        controls={
+                            "ExposureTime": 10000,
+                            "AnalogueGain": 1.0
+                        }
+                    )
+                    self.cam1.configure(backup_config)
+                    self.cam1.start()
+                    self.cam1_connected = True
+                    print("[SUCCESS] Camera 1 initialized independently")
+                    
+            except Exception as e:
+                print(f"[WARNING] Failed to initialize camera 1: {e}")
+                self.cam1_connected = False
+                self.cam1 = None
+
+            # Wait a moment for cameras to stabilize if any connected
+            if self.cam0_connected or self.cam1_connected:
+                time.sleep(2)
+                self.apply_settings()  # Apply initial settings to connected cameras
+                
+        except ImportError:
+            print("[ERROR] Picamera2 not available - running in simulation mode")
+            self.cam0_connected = False
+            self.cam1_connected = False
+            
+        # Report camera status
+        if self.cam0_connected and self.cam1_connected:
+            print("[SUCCESS] Both cameras connected and ready")
+        elif self.cam0_connected or self.cam1_connected:
+            connected = "Camera 0" if self.cam0_connected else "Camera 1"
+            print(f"[WARNING] Only {connected} connected")
+        else:
+            print("[WARNING] No cameras connected - GUI will show disconnected status")
 
     def setup_gui(self):
         self.root = tk.Tk()
@@ -157,6 +229,7 @@ class DualIMX708Viewer:
         ttk.Button(control_frame, text="Save Image", command=self.save_image).pack(fill=tk.X, padx=5, pady=10)
         ttk.Button(control_frame, text="Reset All", command=self.reset_all).pack(fill=tk.X, padx=5)
         ttk.Button(control_frame, text="Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=5)
+        ttk.Button(control_frame, text="Reconnect Cameras", command=self.reconnect_cameras).pack(fill=tk.X, padx=5, pady=5)
 
         # Processing options frame
         processing_frame = ttk.LabelFrame(control_frame, text="Save Options")
@@ -225,71 +298,136 @@ class DualIMX708Viewer:
             "Saturation": self.params['Saturation']['value'],
             "Sharpness": self.params['Sharpness']['value']
         }
-        self.cam0.set_controls(settings)
-        self.cam1.set_controls(settings)
+        
+        # Apply settings only to connected cameras
+        try:
+            if self.cam0_connected and self.cam0 is not None:
+                self.cam0.set_controls(settings)
+        except Exception as e:
+            print(f"[WARNING] Failed to apply settings to camera 0: {e}")
+            self.cam0_connected = False
+            
+        try:
+            if self.cam1_connected and self.cam1 is not None:
+                self.cam1.set_controls(settings)
+        except Exception as e:
+            print(f"[WARNING] Failed to apply settings to camera 1: {e}")
+            self.cam1_connected = False
 
     def save_image(self):
+        # Check if any cameras are connected
+        if not self.cam0_connected and not self.cam1_connected:
+            messagebox.showerror("Error", "No cameras connected! Cannot save images.")
+            print("[ERROR] Cannot save images - no cameras connected")
+            return
+            
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         params_str = "_".join(f"{p}{v['value']:.2f}" for p, v in self.params.items())
 
-        # Capture requests for both cameras
-        req0 = self.cam0.capture_request()
-        req1 = self.cam1.capture_request()
+        # Capture requests for connected cameras only
+        req0 = None
+        req1 = None
+        
+        try:
+            if self.cam0_connected and self.cam0 is not None:
+                req0 = self.cam0.capture_request()
+        except Exception as e:
+            print(f"[WARNING] Failed to capture from camera 0: {e}")
+            self.cam0_connected = False
+            
+        try:
+            if self.cam1_connected and self.cam1 is not None:
+                req1 = self.cam1.capture_request()
+        except Exception as e:
+            print(f"[WARNING] Failed to capture from camera 1: {e}")
+            self.cam1_connected = False
 
         try:
             success_count = 0
             
             # Always save original DNG files first if enabled
             if hasattr(self, 'save_dng_var') and self.save_dng_var.get():
-                original_filename0 = f"cam0_{timestamp}_original_{params_str}.dng"
-                original_filename1 = f"cam1_{timestamp}_original_{params_str}.dng"
-                
                 try:
-                    req0.save_dng(original_filename0)
-                    req1.save_dng(original_filename1)
-                    print(f"[SUCCESS] Saved original DNG files:")
-                    print(f"   {original_filename0}")
-                    print(f"   {original_filename1}")
-                    success_count += 2
+                    if req0 is not None:
+                        original_filename0 = f"cam0_{timestamp}_original_{params_str}.dng"
+                        req0.save_dng(original_filename0)
+                        print(f"[SUCCESS] Saved cam0 DNG: {original_filename0}")
+                        success_count += 1
+                        
+                    if req1 is not None:
+                        original_filename1 = f"cam1_{timestamp}_original_{params_str}.dng"
+                        req1.save_dng(original_filename1)
+                        print(f"[SUCCESS] Saved cam1 DNG: {original_filename1}")
+                        success_count += 1
+                        
+                    if req0 is None and req1 is None:
+                        print(f"[WARNING] No cameras available for DNG capture")
+                        
                 except Exception as e:
-                    print(f"[ERROR] Failed to save original DNG files: {e}")
+                    print(f"[ERROR] Failed to save DNG files: {e}")
 
             # Create processed TIFF if enabled
             if hasattr(self, 'save_tiff_var') and self.save_tiff_var.get():
                 try:
-                    # Get processed RGB arrays from main stream
-                    img0 = req0.make_array("main")
-                    img1 = req1.make_array("main")
+                    # Get processed RGB arrays from main stream for available cameras
+                    img0 = None
+                    img1 = None
                     
-                    print(f"[DEBUG] Original image shapes - Cam0: {img0.shape}, Cam1: {img1.shape}")
-                    print(f"[DEBUG] Original image dtypes - Cam0: {img0.dtype}, Cam1: {img1.dtype}")
-                    print(f"[DEBUG] Original image ranges - Cam0: [{img0.min()}, {img0.max()}], Cam1: [{img1.min()}, {img1.max()}]")
-
-                    # Always apply cropping for TIFF
-                    img0_processed = self.crop_image(img0, 'cam0')
-                    img1_processed = self.crop_image(img1, 'cam1')
-                    print(f"[DEBUG] After cropping - Cam0: {img0_processed.shape}, Cam1: {img1_processed.shape}")
-
-                    # Always apply distortion correction for TIFF
-                    img0_corrected = self.apply_distortion_correction(img0_processed, 'cam0')
-                    img1_corrected = self.apply_distortion_correction(img1_processed, 'cam1')
-                    print(f"[DEBUG] After distortion correction - Cam0 range: [{img0_corrected.min()}, {img0_corrected.max()}]")
-
-                    # Apply perspective correction for TIFF (new step matching v1.3)
-                    img0_perspective = self.apply_perspective_correction(img0_corrected, 'cam0')
-                    img1_perspective = self.apply_perspective_correction(img1_corrected, 'cam1')
-                    print(f"[DEBUG] After perspective correction - applied to both cameras")
-
-                    # Always apply left image rotation for TIFF
-                    img0_final = self.rotate_left_image(img0_perspective)
-                    print(f"[DEBUG] Applied rotation to left image")
+                    if req0 is not None:
+                        img0 = req0.make_array("main")
+                    if req1 is not None:
+                        img1 = req1.make_array("main")
+                        
+                    if img0 is None and img1 is None:
+                        print(f"[WARNING] No cameras available for TIFF processing")
+                        raise Exception("No camera data available")
                     
-                    # Apply right image rotation if enabled
-                    img1_final = self.rotate_right_image(img1_perspective)
-                    if self.apply_right_rotation:
-                        print(f"[DEBUG] Applied rotation to right image")
-                    else:
-                        print(f"[DEBUG] Right image rotation disabled")
+                    # Debug info for available images
+                    if img0 is not None:
+                        print(f"[DEBUG] Cam0 image - shape: {img0.shape}, dtype: {img0.dtype}, range: [{img0.min()}, {img0.max()}]")
+                    if img1 is not None:
+                        print(f"[DEBUG] Cam1 image - shape: {img1.shape}, dtype: {img1.dtype}, range: [{img1.min()}, {img1.max()}]")
+
+                    # Process available images
+                    img0_final = None
+                    img1_final = None
+                    
+                    if img0 is not None:
+                        # Always apply cropping for TIFF
+                        img0_processed = self.crop_image(img0, 'cam0')
+                        print(f"[DEBUG] After cropping - Cam0: {img0_processed.shape}")
+
+                        # Always apply distortion correction for TIFF
+                        img0_corrected = self.apply_distortion_correction(img0_processed, 'cam0')
+                        print(f"[DEBUG] After distortion correction - Cam0 range: [{img0_corrected.min()}, {img0_corrected.max()}]")
+
+                        # Apply perspective correction for TIFF
+                        img0_perspective = self.apply_perspective_correction(img0_corrected, 'cam0')
+                        print(f"[DEBUG] After perspective correction - Cam0")
+
+                        # Always apply left image rotation for TIFF
+                        img0_final = self.rotate_left_image(img0_perspective)
+                        print(f"[DEBUG] Applied rotation to left image")
+                    
+                    if img1 is not None:
+                        # Always apply cropping for TIFF
+                        img1_processed = self.crop_image(img1, 'cam1')
+                        print(f"[DEBUG] After cropping - Cam1: {img1_processed.shape}")
+
+                        # Always apply distortion correction for TIFF
+                        img1_corrected = self.apply_distortion_correction(img1_processed, 'cam1')
+                        print(f"[DEBUG] After distortion correction - Cam1")
+
+                        # Apply perspective correction for TIFF
+                        img1_perspective = self.apply_perspective_correction(img1_corrected, 'cam1')
+                        print(f"[DEBUG] After perspective correction - Cam1")
+                        
+                        # Apply right image rotation if enabled
+                        img1_final = self.rotate_right_image(img1_perspective)
+                        if self.apply_right_rotation:
+                            print(f"[DEBUG] Applied rotation to right image")
+                        else:
+                            print(f"[DEBUG] Right image rotation disabled")
 
                     # Create combined side-by-side image
                     combined_image = self.create_combined_image(img0_final, img1_final)
@@ -334,22 +472,42 @@ class DualIMX708Viewer:
                 print(f"\n[WARNING] No files were saved.")
 
         finally:
-            # Always release the requests
-            req0.release()
-            req1.release()
+            # Always release the requests if they exist
+            try:
+                if req0 is not None:
+                    req0.release()
+            except Exception as e:
+                print(f"[WARNING] Error releasing req0: {e}")
+                
+            try:
+                if req1 is not None:
+                    req1.release()
+            except Exception as e:
+                print(f"[WARNING] Error releasing req1: {e}")
 
     def create_combined_image(self, left_image, right_image):
-        """Create a side-by-side combined image"""
+        """Create a side-by-side combined image, handling missing cameras"""
         try:
-            # Ensure both images have the same height
-            min_height = min(left_image.shape[0], right_image.shape[0])
-            left_resized = left_image[:min_height, :]
-            right_resized = right_image[:min_height, :]
-            
-            # Combine horizontally
-            combined = np.hstack((left_resized, right_resized))
-            print(f"[INFO] Created combined image: {combined.shape}")
-            return combined
+            # Handle case where one or both images are missing
+            if left_image is None and right_image is None:
+                print(f"[ERROR] Both images are None")
+                return None
+            elif left_image is None:
+                print(f"[INFO] Left camera disconnected, using right camera only")
+                return right_image
+            elif right_image is None:
+                print(f"[INFO] Right camera disconnected, using left camera only")
+                return left_image
+            else:
+                # Both images available - combine side by side
+                min_height = min(left_image.shape[0], right_image.shape[0])
+                left_resized = left_image[:min_height, :]
+                right_resized = right_image[:min_height, :]
+                
+                # Combine horizontally
+                combined = np.hstack((left_resized, right_resized))
+                print(f"[INFO] Created combined image: {combined.shape}")
+                return combined
         except Exception as e:
             print(f"[ERROR] Failed to create combined image: {e}")
             return None
@@ -377,15 +535,49 @@ class DualIMX708Viewer:
             return False
 
     def update_preview(self):
-        frame0 = self.cam0.capture_array()
-        frame1 = self.cam1.capture_array()
+        # Create placeholder images for disconnected cameras
+        placeholder_shape = (480, 640, 3)  # Height, Width, Channels
+        
+        # Try to capture from connected cameras
+        frame0 = None
+        frame1 = None
+        
+        if self.cam0_connected and self.cam0 is not None:
+            try:
+                frame0 = self.cam0.capture_array()
+            except Exception as e:
+                print(f"[WARNING] Camera 0 capture failed: {e}")
+                self.cam0_connected = False
+                
+        if self.cam1_connected and self.cam1 is not None:
+            try:
+                frame1 = self.cam1.capture_array()
+            except Exception as e:
+                print(f"[WARNING] Camera 1 capture failed: {e}")
+                self.cam1_connected = False
 
-        # Always apply processing for preview (cropping and correction)
-        frame0_display = self.crop_image(frame0, 'cam0')
-        frame1_display = self.crop_image(frame1, 'cam1')
+        # Process or create placeholder for camera 0
+        if frame0 is not None:
+            # Always apply processing for preview (cropping and correction)
+            frame0_display = self.crop_image(frame0, 'cam0')
+            display0 = cv2.resize(frame0_display, (640, 480))
+        else:
+            # Create disconnected placeholder
+            display0 = np.zeros(placeholder_shape, dtype=np.uint8)
+            cv2.putText(display0, "Camera 0", (240, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(display0, "DISCONNECTED", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            
+        # Process or create placeholder for camera 1
+        if frame1 is not None:
+            # Always apply processing for preview (cropping and correction)  
+            frame1_display = self.crop_image(frame1, 'cam1')
+            display1 = cv2.resize(frame1_display, (640, 480))
+        else:
+            # Create disconnected placeholder
+            display1 = np.zeros(placeholder_shape, dtype=np.uint8)
+            cv2.putText(display1, "Camera 1", (240, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(display1, "DISCONNECTED", (200, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-        display0 = cv2.resize(frame0_display, (640, 480))
-        display1 = cv2.resize(frame1_display, (640, 480))
         combined = np.hstack((display0, display1))
 
         y = 30
@@ -394,6 +586,14 @@ class DualIMX708Viewer:
             cv2.putText(combined, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             y += 20
 
+        # Add camera connection status
+        cam0_status = "CONNECTED" if self.cam0_connected else "DISCONNECTED"
+        cam1_status = "CONNECTED" if self.cam1_connected else "DISCONNECTED"
+        cv2.putText(combined, f"Cam0: {cam0_status}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if self.cam0_connected else (0, 0, 255), 1)
+        y += 20
+        cv2.putText(combined, f"Cam1: {cam1_status}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if self.cam1_connected else (0, 0, 255), 1)
+        y += 20
+        
         # Add save options status
         tiff_status = "ON" if self.save_tiff_var.get() else "OFF"
         dng_status = "ON" if self.save_dng_var.get() else "OFF"
@@ -426,10 +626,59 @@ class DualIMX708Viewer:
         self.update_preview()
         self.root.mainloop()
 
+    def reconnect_cameras(self):
+        """Try to reconnect cameras"""
+        print("Attempting to reconnect cameras...")
+        
+        # Stop existing cameras if they exist
+        try:
+            if self.cam0 is not None:
+                self.cam0.stop()
+        except:
+            pass
+        try:
+            if self.cam1 is not None:
+                self.cam1.stop()
+        except:
+            pass
+            
+        # Reset camera objects
+        self.cam0 = None
+        self.cam1 = None
+        self.cam0_connected = False
+        self.cam1_connected = False
+        
+        # Wait a moment
+        time.sleep(1)
+        
+        # Try to reinitialize
+        self.initialize_cameras()
+        
+        # Show result
+        if self.cam0_connected and self.cam1_connected:
+            messagebox.showinfo("Success", "Both cameras reconnected successfully!")
+        elif self.cam0_connected or self.cam1_connected:
+            connected = "Camera 0" if self.cam0_connected else "Camera 1"
+            messagebox.showwarning("Partial Success", f"Only {connected} reconnected")
+        else:
+            messagebox.showerror("Failed", "No cameras could be connected")
+
     def cleanup(self):
         self.save_settings()
-        self.cam0.stop()
-        self.cam1.stop()
+        
+        # Stop cameras safely
+        try:
+            if self.cam0 is not None and self.cam0_connected:
+                self.cam0.stop()
+        except Exception as e:
+            print(f"[WARNING] Error stopping camera 0: {e}")
+            
+        try:
+            if self.cam1 is not None and self.cam1_connected:
+                self.cam1.stop()
+        except Exception as e:
+            print(f"[WARNING] Error stopping camera 1: {e}")
+            
         cv2.destroyAllWindows()
 
     def on_scale_change(self, param_name):
@@ -560,14 +809,18 @@ class DualIMX708Viewer:
         
         if files_found:
             # Save the loaded coefficients for future use
-            self.save_distortion_coefficients()
-            print("[SUCCESS] Loaded and saved coefficients from original files")
+            try:
+                self.save_distortion_coefficients()
+                print("[SUCCESS] Loaded and saved coefficients from original files")
+            except Exception as e:
+                print(f"[WARNING] Could not save coefficients: {e}")
         else:
             print("[INFO] No calibration files found - using built-in default coefficients")
             print(f"   Cam0 (Left): center=({self.distortion_params['cam0']['xcenter']:.1f}, {self.distortion_params['cam0']['ycenter']:.1f})")
             print(f"   Cam1 (Right): center=({self.distortion_params['cam1']['xcenter']:.1f}, {self.distortion_params['cam1']['ycenter']:.1f})")
             print("   Perspective correction: Not available (no pers_coef data)")
             print("   Note: GUI will work with radial distortion correction using defaults")
+            print("   GUI is ready to use!")
 
     def prompt_for_coefficient_files(self):
         """Prompt user to select coefficient files for both cameras"""
