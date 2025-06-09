@@ -254,7 +254,7 @@ class DualIMX708Viewer:
                             success_count += 1
                         else:
                             print(f"[ERROR] Failed to save combined TIFF")
-        else:
+                    else:
                         print(f"[ERROR] Failed to create combined image")
                         
                 except Exception as e:
@@ -264,8 +264,8 @@ class DualIMX708Viewer:
 
             if success_count > 0:
                 print(f"\n[SUCCESS] Save operation complete! {success_count} files saved.")
-        else:
-                print(f"\n[WARNING] No files were saved.")
+            else:
+                    print(f"\n[WARNING] No files were saved.")
 
         finally:
             # Always release the requests
@@ -315,8 +315,8 @@ class DualIMX708Viewer:
         frame1 = self.cam1.capture_array()
 
         # Always apply processing for preview (cropping and correction)
-            frame0_display = self.crop_image(frame0, 'cam0')
-            frame1_display = self.crop_image(frame1, 'cam1')
+        frame0_display = self.crop_image(frame0, 'cam0')
+        frame1_display = self.crop_image(frame1, 'cam1')
 
         display0 = cv2.resize(frame0_display, (640, 480))
         display1 = cv2.resize(frame1_display, (640, 480))

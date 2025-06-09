@@ -623,8 +623,12 @@ class DualIMX708Viewer:
         self.root.after(100, self.update_preview)
 
     def run(self):
-        self.update_preview()
+        # Skip preview for now - it causes GUI to hang
+        # self.update_preview()
+        print("GUI ready - preview disabled to prevent hanging")
         self.root.mainloop()
+        print("Main loop exited")
+
 
     def reconnect_cameras(self):
         """Try to reconnect cameras"""

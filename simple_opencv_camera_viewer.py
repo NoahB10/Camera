@@ -1,510 +1,708 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+from picamera2 import Picamera2
 import cv2
 import time
 import numpy as np
 from datetime import datetime
 import os
 import json
-from picamera2 import Picamera2
+from PIL import Image
+import discorpy.post.postprocessing as post
 
-class SimpleOpenCVCameraViewer:
+class DualIMX708Viewer:
     def __init__(self):
-        # Camera connection status
-        self.cam0_connected = False
-        self.cam1_connected = False
-        self.cam0 = None
-        self.cam1 = None
-        
-        # Camera configuration
-        self.camera_config = None
-        
-        # Default camera parameters
+        # Initialize both cameras
+        self.cam0 = Picamera2(0)
+        self.cam1 = Picamera2(1)
+
+        # Shared full-resolution raw configuration
+        self.camera_config = self.cam0.create_still_configuration(
+            raw={"size": (4608, 2592)},
+            controls={
+                "ExposureTime": 10000,
+                "AnalogueGain": 1.0
+            }
+        )
+
+        self.cam0.configure(self.camera_config)
+        self.cam1.configure(self.camera_config)
+
+        # Cropping parameters
+        self.crop_params = {
+            'cam0': {'width': 2161, 'start_x': 1284, 'height': 2592},
+            'cam1': {'width': 2088, 'start_x': 1336, 'height': 2592}
+        }
+
+        # Distortion correction parameters (default values - will be loaded from files)
+        self.distortion_params = {
+            'cam0': {
+                'xcenter': 1189.0732,
+                'ycenter': 1224.3019,
+                'coeffs': [1.0493219962591438, -5.8329152691427105e-05, -4.317510446486265e-08]
+            },
+            'cam1': {
+                'xcenter': 1189.2568,
+                'ycenter': 1223.9213,
+                'coeffs': [1.006674855782123, 0.00010232984957050351, -1.3102049770975328e-07]
+            }
+        }
+
+        # Control flags
+        self.apply_cropping = True
+        self.enable_distortion_correction = True
+
+        # Default/base values
+        self.defaults = {
+            'ExposureTime': 10000,
+            'AnalogueGain': 1.0,
+            'Brightness': 0.0,
+            'Contrast': 1.0,
+            'Saturation': 1.0,
+            'Sharpness': 1.0
+        }
+
+        # Parameter ranges
         self.params = {
-            'ExposureTime': 10000,
-            'AnalogueGain': 100,  # Scale to 1-2000 for trackbar
-            'Brightness': 100,    # Scale to 0-200 for trackbar (0=-1.0, 100=0.0, 200=1.0)
-            'Contrast': 100,      # Scale to 0-400 for trackbar (100=1.0)
-            'Saturation': 100,    # Scale to 0-400 for trackbar (100=1.0)
-            'Sharpness': 100      # Scale to 0-400 for trackbar (100=1.0)
+            'ExposureTime': {'value': self.defaults['ExposureTime'], 'min': 100, 'max': 100000},
+            'AnalogueGain': {'value': self.defaults['AnalogueGain'], 'min': 1.0, 'max': 20.0},
+            'Brightness': {'value': self.defaults['Brightness'], 'min': -1.0, 'max': 1.0},
+            'Contrast': {'value': self.defaults['Contrast'], 'min': 0.0, 'max': 4.0},
+            'Saturation': {'value': self.defaults['Saturation'], 'min': 0.0, 'max': 4.0},
+            'Sharpness': {'value': self.defaults['Sharpness'], 'min': 0.0, 'max': 4.0}
         }
-        
-        # Parameter ranges for actual camera values
-        self.param_ranges = {
-            'ExposureTime': {'min': 100, 'max': 100000},
-            'AnalogueGain': {'min': 1.0, 'max': 20.0},
-            'Brightness': {'min': -1.0, 'max': 1.0},
-            'Contrast': {'min': 0.0, 'max': 4.0},
-            'Saturation': {'min': 0.0, 'max': 4.0},
-            'Sharpness': {'min': 0.0, 'max': 4.0}
-        }
-        
-        # Initialize cameras
-        self.initialize_cameras()
-        
-        # Setup OpenCV windows and trackbars
-        self.setup_opencv_interface()
-        
-        # Load previous settings
+
+        self.setup_gui()
+        self.cam0.start()
+        self.cam1.start()
+        time.sleep(2)
         self.load_settings()
+        self.load_distortion_coefficients()
 
-    def initialize_cameras(self):
-        """Initialize cameras with error handling"""
-        print("Attempting to initialize cameras...")
-        
-        try:
-            # Try to initialize camera 0
-            try:
-                self.cam0 = Picamera2(0)
-                
-                # Create shared configuration for consistent settings
-                self.camera_config = self.cam0.create_still_configuration(
-                    raw={"size": (4608, 2592)},
-                    controls={
-                        "ExposureTime": self.params['ExposureTime'],
-                        "AnalogueGain": self.scale_to_actual('AnalogueGain', self.params['AnalogueGain'])
-                    }
-                )
-                
-                self.cam0.configure(self.camera_config)
-                self.cam0.start()
-                self.cam0_connected = True
-                print("[SUCCESS] Camera 0 initialized and started")
-                
-            except Exception as e:
-                print(f"[WARNING] Failed to initialize camera 0: {e}")
-                self.cam0_connected = False
-                self.cam0 = None
+    def setup_gui(self):
+        self.root = tk.Tk()
+        self.root.title("Dual IMX708 Camera Control")
 
-            # Try to initialize camera 1
-            try:
-                if self.camera_config is not None:
-                    self.cam1 = Picamera2(1)
-                    self.cam1.configure(self.camera_config)
-                    self.cam1.start()
-                    self.cam1_connected = True
-                    print("[SUCCESS] Camera 1 initialized and started")
-                else:
-                    # Independent initialization
-                    self.cam1 = Picamera2(1)
-                    backup_config = self.cam1.create_still_configuration(
-                        raw={"size": (4608, 2592)},
-                        controls={
-                            "ExposureTime": self.params['ExposureTime'],
-                            "AnalogueGain": self.scale_to_actual('AnalogueGain', self.params['AnalogueGain'])
-                        }
-                    )
-                    self.cam1.configure(backup_config)
-                    self.cam1.start()
-                    self.cam1_connected = True
-                    print("[SUCCESS] Camera 1 initialized independently")
-                    
-            except Exception as e:
-                print(f"[WARNING] Failed to initialize camera 1: {e}")
-                self.cam1_connected = False
-                self.cam1 = None
+        control_frame = ttk.Frame(self.root)
+        control_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=10, pady=10)
 
-            # Wait for cameras to stabilize
-            if self.cam0_connected or self.cam1_connected:
-                time.sleep(2)
-                
-        except ImportError:
-            print("[ERROR] Picamera2 not available - running in simulation mode")
-            self.cam0_connected = False
-            self.cam1_connected = False
+        self.entries = {}
+        self.scales = {}
 
-    def setup_opencv_interface(self):
-        """Setup OpenCV windows and trackbars"""
-        # Create main camera windows
-        cv2.namedWindow('Camera 0', cv2.WINDOW_RESIZABLE)
-        cv2.namedWindow('Camera 1', cv2.WINDOW_RESIZABLE)
-        cv2.namedWindow('Controls', cv2.WINDOW_NORMAL)
-        
-        # Position windows
-        cv2.moveWindow('Camera 0', 100, 100)
-        cv2.moveWindow('Camera 1', 700, 100)
-        cv2.moveWindow('Controls', 100, 600)
-        
-        # Create control window with trackbars
-        control_img = np.zeros((400, 600, 3), dtype=np.uint8)
-        cv2.imshow('Controls', control_img)
-        
-        # Create trackbars for camera parameters
-        cv2.createTrackbar('Exposure Time (x100)', 'Controls', 
-                          self.params['ExposureTime'] // 100, 1000, 
-                          lambda val: self.on_trackbar_change('ExposureTime', val * 100))
-        
-        cv2.createTrackbar('Analogue Gain', 'Controls', 
-                          self.params['AnalogueGain'], 2000, 
-                          lambda val: self.on_trackbar_change('AnalogueGain', val))
-        
-        cv2.createTrackbar('Brightness', 'Controls', 
-                          self.params['Brightness'], 200, 
-                          lambda val: self.on_trackbar_change('Brightness', val))
-        
-        cv2.createTrackbar('Contrast', 'Controls', 
-                          self.params['Contrast'], 400, 
-                          lambda val: self.on_trackbar_change('Contrast', val))
-        
-        cv2.createTrackbar('Saturation', 'Controls', 
-                          self.params['Saturation'], 400, 
-                          lambda val: self.on_trackbar_change('Saturation', val))
-        
-        cv2.createTrackbar('Sharpness', 'Controls', 
-                          self.params['Sharpness'], 400, 
-                          lambda val: self.on_trackbar_change('Sharpness', val))
+        for param_name, param_data in self.params.items():
+            frame = ttk.LabelFrame(control_frame, text=param_name)
+            frame.pack(fill=tk.X, padx=5, pady=5)
 
-    def scale_to_actual(self, param_name, scaled_value):
-        """Convert trackbar value to actual camera parameter value"""
-        if param_name == 'ExposureTime':
-            return int(scaled_value)
-        elif param_name == 'AnalogueGain':
-            # Scale 0-2000 to 1.0-20.0
-            return 1.0 + (scaled_value / 2000.0) * 19.0
-        elif param_name == 'Brightness':
-            # Scale 0-200 to -1.0-1.0
-            return (scaled_value - 100) / 100.0
-        elif param_name in ['Contrast', 'Saturation', 'Sharpness']:
-            # Scale 0-400 to 0.0-4.0
-            return scaled_value / 100.0
-        return scaled_value
+            scale = ttk.Scale(
+                frame,
+                from_=param_data['min'],
+                to=param_data['max'],
+                value=param_data['value'],
+                orient=tk.HORIZONTAL
+            )
+            scale.pack(fill=tk.X, padx=5)
+            scale.bind("<ButtonRelease-1>", lambda e, p=param_name: self.on_scale_change(p))
+            self.scales[param_name] = scale
 
-    def on_trackbar_change(self, param_name, value):
-        """Handle trackbar changes"""
-        self.params[param_name] = value
-        self.apply_camera_settings()
+            entry_frame = ttk.Frame(frame)
+            entry_frame.pack(fill=tk.X, padx=5)
 
-    def apply_camera_settings(self):
-        """Apply current parameter values to cameras"""
+            entry = ttk.Entry(entry_frame, width=10)
+            entry.insert(0, str(param_data['value']))
+            entry.pack(side=tk.LEFT, padx=2)
+            entry.bind('<Return>', lambda e, p=param_name: self.on_entry_change(p))
+            self.entries[param_name] = entry
+
+            ttk.Button(entry_frame, text="Set", command=lambda p=param_name: self.on_entry_change(p)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(entry_frame, text="Reset", command=lambda p=param_name: self.reset_parameter(p)).pack(side=tk.LEFT, padx=2)
+
+        ttk.Button(control_frame, text="Save Image", command=self.save_image).pack(fill=tk.X, padx=5, pady=10)
+        ttk.Button(control_frame, text="Reset All", command=self.reset_all).pack(fill=tk.X, padx=5)
+        ttk.Button(control_frame, text="Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=5)
+
+        # Processing options frame
+        processing_frame = ttk.LabelFrame(control_frame, text="Image Processing")
+        processing_frame.pack(fill=tk.X, padx=5, pady=10)
+
+        # Cropping checkbox
+        self.crop_var = tk.BooleanVar(value=self.apply_cropping)
+        ttk.Checkbutton(processing_frame, text="Apply Cropping", 
+                       variable=self.crop_var, 
+                       command=self.toggle_cropping).pack(anchor=tk.W, padx=5, pady=2)
+
+        # Distortion correction checkbox
+        self.distortion_var = tk.BooleanVar(value=self.enable_distortion_correction)
+        ttk.Checkbutton(processing_frame, text="Apply Distortion Correction", 
+                       variable=self.distortion_var, 
+                       command=self.toggle_distortion_correction).pack(anchor=tk.W, padx=5, pady=2)
+
+        # Reload coefficients button
+        ttk.Button(processing_frame, text="Reload Distortion Coefficients", 
+                  command=self.load_distortion_coefficients).pack(fill=tk.X, padx=5, pady=5)
+
+        # Upload calibration files buttons
+        upload_frame = ttk.Frame(processing_frame)
+        upload_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Button(upload_frame, text="Upload Left (Cam0) Calibration", 
+                  command=lambda: self.upload_calibration_file('cam0')).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+        ttk.Button(upload_frame, text="Upload Right (Cam1) Calibration", 
+                  command=lambda: self.upload_calibration_file('cam1')).pack(side=tk.LEFT, padx=2, fill=tk.X, expand=True)
+
+        # Show current parameters button
+        ttk.Button(processing_frame, text="Show Current Distortion Parameters", 
+                  command=self.show_distortion_parameters).pack(fill=tk.X, padx=5, pady=2)
+
+        # Crop parameters display
+        crop_info_frame = ttk.LabelFrame(processing_frame, text="Crop Parameters")
+        crop_info_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(crop_info_frame, text="Cam0: 2161x2592 @ (1284,0)").pack(anchor=tk.W, padx=5)
+        ttk.Label(crop_info_frame, text="Cam1: 2088x2592 @ (1336,0)").pack(anchor=tk.W, padx=5)
+
+    def apply_settings(self):
         settings = {
-            "ExposureTime": int(self.params['ExposureTime']),
-            "AnalogueGain": self.scale_to_actual('AnalogueGain', self.params['AnalogueGain']),
-            "Brightness": self.scale_to_actual('Brightness', self.params['Brightness']),
-            "Contrast": self.scale_to_actual('Contrast', self.params['Contrast']),
-            "Saturation": self.scale_to_actual('Saturation', self.params['Saturation']),
-            "Sharpness": self.scale_to_actual('Sharpness', self.params['Sharpness'])
+            "ExposureTime": int(self.params['ExposureTime']['value']),
+            "AnalogueGain": self.params['AnalogueGain']['value'],
+            "Brightness": self.params['Brightness']['value'],
+            "Contrast": self.params['Contrast']['value'],
+            "Saturation": self.params['Saturation']['value'],
+            "Sharpness": self.params['Sharpness']['value']
         }
-        
-        try:
-            if self.cam0_connected and self.cam0 is not None:
-                self.cam0.set_controls(settings)
-        except Exception as e:
-            print(f"[WARNING] Failed to apply settings to camera 0: {e}")
-            
-        try:
-            if self.cam1_connected and self.cam1 is not None:
-                self.cam1.set_controls(settings)
-        except Exception as e:
-            print(f"[WARNING] Failed to apply settings to camera 1: {e}")
+        self.cam0.set_controls(settings)
+        self.cam1.set_controls(settings)
 
-    def add_overlay_text(self, image, camera_name, connected):
-        """Add parameter overlay to camera image"""
-        if image is None:
-            return image
-            
-        overlay = image.copy()
-        
-        # Connection status
-        status_color = (0, 255, 0) if connected else (0, 0, 255)
-        status_text = "CONNECTED" if connected else "DISCONNECTED"
-        cv2.putText(overlay, f"{camera_name}: {status_text}", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, status_color, 2)
-        
-        if connected:
-            # Add parameter values
-            y_offset = 60
-            params_display = [
-                f"Exposure: {self.params['ExposureTime']}",
-                f"Gain: {self.scale_to_actual('AnalogueGain', self.params['AnalogueGain']):.2f}",
-                f"Brightness: {self.scale_to_actual('Brightness', self.params['Brightness']):.2f}",
-                f"Contrast: {self.scale_to_actual('Contrast', self.params['Contrast']):.2f}",
-                f"Saturation: {self.scale_to_actual('Saturation', self.params['Saturation']):.2f}",
-                f"Sharpness: {self.scale_to_actual('Sharpness', self.params['Sharpness']):.2f}"
-            ]
-            
-            for param_text in params_display:
-                cv2.putText(overlay, param_text, (10, y_offset), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-                y_offset += 25
-        
-        # Add instructions
-        instructions = [
-            "Press 'S' to save images",
-            "Press 'R' to reset parameters", 
-            "Press 'Q' to quit",
-            "Use trackbars to adjust settings"
-        ]
-        
-        y_start = overlay.shape[0] - len(instructions) * 25 - 10
-        for i, instruction in enumerate(instructions):
-            cv2.putText(overlay, instruction, (10, y_start + i * 25), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        
-        return overlay
-
-    def update_control_window(self):
-        """Update the control window with current status"""
-        control_img = np.zeros((400, 600, 3), dtype=np.uint8)
-        
-        # Title
-        cv2.putText(control_img, "Simple Dual Camera Control", (20, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-        
-        # Connection status
-        cam0_status = "Connected" if self.cam0_connected else "Disconnected"
-        cam1_status = "Connected" if self.cam1_connected else "Disconnected"
-        
-        cam0_color = (0, 255, 0) if self.cam0_connected else (0, 0, 255)
-        cam1_color = (0, 255, 0) if self.cam1_connected else (0, 0, 255)
-        
-        cv2.putText(control_img, f"Camera 0: {cam0_status}", (20, 70), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, cam0_color, 2)
-        cv2.putText(control_img, f"Camera 1: {cam1_status}", (20, 100), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, cam1_color, 2)
-        
-        # Current parameter values
-        y_offset = 140
-        cv2.putText(control_img, "Current Parameters:", (20, y_offset), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
-        y_offset += 30
-        
-        param_texts = [
-            f"Exposure Time: {self.params['ExposureTime']}",
-            f"Analogue Gain: {self.scale_to_actual('AnalogueGain', self.params['AnalogueGain']):.2f}",
-            f"Brightness: {self.scale_to_actual('Brightness', self.params['Brightness']):.2f}",
-            f"Contrast: {self.scale_to_actual('Contrast', self.params['Contrast']):.2f}",
-            f"Saturation: {self.scale_to_actual('Saturation', self.params['Saturation']):.2f}",
-            f"Sharpness: {self.scale_to_actual('Sharpness', self.params['Sharpness']):.2f}"
-        ]
-        
-        for param_text in param_texts:
-            cv2.putText(control_img, param_text, (20, y_offset), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-            y_offset += 25
-        
-        cv2.imshow('Controls', control_img)
-
-    def save_images(self):
-        """Save images from both cameras"""
-        if not self.cam0_connected and not self.cam1_connected:
-            print("[ERROR] No cameras connected! Cannot save images.")
-            return
-            
+    def save_image(self):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+        params_str = "_".join(f"{p}{v['value']:.2f}" for p, v in self.params.items())
+
+        # Capture requests for both cameras
+        req0 = self.cam0.capture_request()
+        req1 = self.cam1.capture_request()
+
         try:
-            success_count = 0
+            # Create filenames with processing info
+            crop_str = "cropped" if self.apply_cropping else "full"
+            distort_str = "corrected" if self.enable_distortion_correction else "raw"
             
-            # Capture and save from camera 0
-            if self.cam0_connected and self.cam0 is not None:
+            # Always save original DNG files first (these are unprocessed)
+            original_filename0 = f"cam0_{timestamp}_original_{params_str}.dng"
+            original_filename1 = f"cam1_{timestamp}_original_{params_str}.dng"
+            
+            try:
+                req0.save_dng(original_filename0)
+                req1.save_dng(original_filename1)
+                print(f"[SUCCESS] Saved original DNG files:")
+                print(f"   {original_filename0}")
+                print(f"   {original_filename1}")
+            except Exception as e:
+                print(f"[ERROR] Failed to save original DNG files: {e}")
+
+            # If processing is enabled, save processed versions
+            if self.apply_cropping or self.enable_distortion_correction:
                 try:
-                    req0 = self.cam0.capture_request()
+                    # For processed images, we need to work with the main stream (processed RGB data)
+                    # NOT the raw stream which is Bayer data
                     
-                    # Save DNG
-                    dng_filename0 = f"cam0_{timestamp}_raw.dng"
-                    req0.save_dng(dng_filename0)
-                    print(f"[SUCCESS] Saved cam0 DNG: {dng_filename0}")
-                    
-                    # Save TIFF
+                    # Get processed RGB arrays from main stream
                     img0 = req0.make_array("main")
-                    tiff_filename0 = f"cam0_{timestamp}_raw.tiff"
-                    cv2.imwrite(tiff_filename0, cv2.cvtColor(img0, cv2.COLOR_RGB2BGR))
-                    print(f"[SUCCESS] Saved cam0 TIFF: {tiff_filename0}")
-                    
-                    req0.release()
-                    success_count += 2
-                    
-                except Exception as e:
-                    print(f"[ERROR] Failed to save from camera 0: {e}")
-            
-            # Capture and save from camera 1
-            if self.cam1_connected and self.cam1 is not None:
-                try:
-                    req1 = self.cam1.capture_request()
-                    
-                    # Save DNG
-                    dng_filename1 = f"cam1_{timestamp}_raw.dng"
-                    req1.save_dng(dng_filename1)
-                    print(f"[SUCCESS] Saved cam1 DNG: {dng_filename1}")
-                    
-                    # Save TIFF
                     img1 = req1.make_array("main")
-                    tiff_filename1 = f"cam1_{timestamp}_raw.tiff"
-                    cv2.imwrite(tiff_filename1, cv2.cvtColor(img1, cv2.COLOR_RGB2BGR))
-                    print(f"[SUCCESS] Saved cam1 TIFF: {tiff_filename1}")
                     
-                    req1.release()
-                    success_count += 2
+                    print(f"[DEBUG] Original image shapes - Cam0: {img0.shape}, Cam1: {img1.shape}")
+                    print(f"[DEBUG] Original image dtypes - Cam0: {img0.dtype}, Cam1: {img1.dtype}")
+                    print(f"[DEBUG] Original image ranges - Cam0: [{img0.min()}, {img0.max()}], Cam1: [{img1.min()}, {img1.max()}]")
+
+                    # Apply cropping if enabled
+                    if self.apply_cropping:
+                        img0_processed = self.crop_image(img0, 'cam0')
+                        img1_processed = self.crop_image(img1, 'cam1')
+                        print(f"[DEBUG] After cropping - Cam0: {img0_processed.shape}, Cam1: {img1_processed.shape}")
+                    else:
+                        img0_processed = img0
+                        img1_processed = img1
+
+                    # Apply distortion correction if enabled
+                    if self.enable_distortion_correction:
+                        print(f"[DEBUG] Before distortion correction - Cam0 range: [{img0_processed.min()}, {img0_processed.max()}]")
+                        img0_corrected = self.apply_distortion_correction(img0_processed, 'cam0')
+                        img1_corrected = self.apply_distortion_correction(img1_processed, 'cam1')
+                        print(f"[DEBUG] After distortion correction - Cam0 range: [{img0_corrected.min()}, {img0_corrected.max()}]")
+                    else:
+                        img0_corrected = img0_processed
+                        img1_corrected = img1_processed
+
+                    # For processed DNG files, we need to create new requests with the processed data
+                    # This is complex, so let's save as TIFF for processed versions
+                    processed_filename0 = f"cam0_{timestamp}_{crop_str}_{distort_str}_{params_str}.tiff"
+                    processed_filename1 = f"cam1_{timestamp}_{crop_str}_{distort_str}_{params_str}.tiff"
+
+                    # Convert to proper format for saving
+                    def prepare_for_save(img):
+                        # Handle different input formats
+                        if img.dtype == np.uint8:
+                            # Already 8-bit, convert to 16-bit for better quality
+                            return (img.astype(np.uint16) * 257)
+                        elif img.dtype == np.float32 or img.dtype == np.float64:
+                            # Float data, normalize to 16-bit
+                            img_norm = np.clip(img, 0, None)  # Remove negative values
+                            if img_norm.max() <= 1.0:
+                                # 0-1 range, scale to 16-bit
+                                return (img_norm * 65535).astype(np.uint16)
+                            elif img_norm.max() <= 255:
+                                # 0-255 range, scale to 16-bit  
+                                return (img_norm * 257).astype(np.uint16)
+                            else:
+                                # Already in larger range, just convert
+                                return np.clip(img_norm, 0, 65535).astype(np.uint16)
+                        else:
+                            # Assume uint16 or similar
+                            return np.clip(img, 0, 65535).astype(np.uint16)
+
+                    img0_save = prepare_for_save(img0_corrected)
+                    img1_save = prepare_for_save(img1_corrected)
+
+                    print(f"[DEBUG] Final save format - Cam0: {img0_save.shape}, dtype: {img0_save.dtype}, range: [{img0_save.min()}, {img0_save.max()}]")
+
+                    # Save as TIFF files
+                    from PIL import Image
                     
+                    # Handle different image formats for PIL
+                    if len(img0_save.shape) == 3:
+                        # Multi-channel image - convert BGR to RGB for PIL
+                        if img0_save.shape[2] == 3:
+                            img0_pil = Image.fromarray(img0_save[:,:,[2,1,0]])  # BGR to RGB
+                            img1_pil = Image.fromarray(img1_save[:,:,[2,1,0]])  # BGR to RGB
+                        else:
+                            img0_pil = Image.fromarray(img0_save)
+                            img1_pil = Image.fromarray(img1_save)
+                    else:
+                        # Grayscale image
+                        img0_pil = Image.fromarray(img0_save)
+                        img1_pil = Image.fromarray(img1_save)
+                    
+                    img0_pil.save(processed_filename0)
+                    img1_pil.save(processed_filename1)
+                    
+                    print(f"[SUCCESS] Saved processed images:")
+                    print(f"   {processed_filename0} (shape: {img0_save.shape})")
+                    print(f"   {processed_filename1} (shape: {img1_save.shape})")
+                    
+                    # If you want processed DNG files, we can try to create them using the helpers
+                    # But this is experimental and may not work perfectly
+                    if True:  # Set to True if you want to try processed DNG files
+                        try:
+                            processed_dng_filename0 = f"cam0_{timestamp}_{crop_str}_{distort_str}_{params_str}_processed.dng"
+                            processed_dng_filename1 = f"cam1_{timestamp}_{crop_str}_{distort_str}_{params_str}_processed.dng"
+                            
+                            # Get metadata from original request
+                            metadata0 = req0.get_metadata()
+                            metadata1 = req1.get_metadata()
+                            
+                            # Try to save processed data as DNG using helpers
+                            # Note: This may not work perfectly as DNG expects raw Bayer data
+                            # but we're giving it processed RGB data
+                            
+                            # Convert back to buffer format for save_dng
+                            buffer0 = img0_save.tobytes()
+                            buffer1 = img1_save.tobytes()
+                            
+                            # Create a fake config for the processed image
+                            fake_config0 = {
+                                'format': 'RGB888' if len(img0_save.shape) == 3 else 'R8',
+                                'size': (img0_save.shape[1], img0_save.shape[0]),
+                                'stride': img0_save.shape[1] * (img0_save.shape[2] if len(img0_save.shape) == 3 else 1) * 2,  # 2 bytes per pixel for uint16
+                                'framesize': len(buffer0)
+                            }
+                            fake_config1 = {
+                                'format': 'RGB888' if len(img1_save.shape) == 3 else 'R8', 
+                                'size': (img1_save.shape[1], img1_save.shape[0]),
+                                'stride': img1_save.shape[1] * (img1_save.shape[2] if len(img1_save.shape) == 3 else 1) * 2,
+                                'framesize': len(buffer1)
+                            }
+                            
+                            # This might not work as DNG expects Bayer data, but let's try
+                            self.cam0.helpers.save_dng(buffer0, metadata0, fake_config0, processed_dng_filename0)
+                            self.cam1.helpers.save_dng(buffer1, metadata1, fake_config1, processed_dng_filename1)
+                            
+                            print(f"[SUCCESS] Saved processed DNG files (experimental):")
+                            print(f"   {processed_dng_filename0}")
+                            print(f"   {processed_dng_filename1}")
+                            
+                        except Exception as e:
+                            print(f"[WARNING] Failed to save processed DNG files (this is expected): {e}")
+                            print("   Processed DNG saving is experimental and may not work with RGB data")
+                        
                 except Exception as e:
-                    print(f"[ERROR] Failed to save from camera 1: {e}")
-            
-            print(f"\n[SUCCESS] Save operation complete! {success_count} files saved.")
-            
-        except Exception as e:
-            print(f"[ERROR] Save operation failed: {e}")
+                    print(f"[ERROR] Failed to save processed images: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-    def reset_parameters(self):
-        """Reset all parameters to defaults"""
-        defaults = {
-            'ExposureTime': 10000,
-            'AnalogueGain': 100,
-            'Brightness': 100,
-            'Contrast': 100,
-            'Saturation': 100,
-            'Sharpness': 100
-        }
-        
-        self.params.update(defaults)
-        
-        # Update trackbars
-        cv2.setTrackbarPos('Exposure Time (x100)', 'Controls', defaults['ExposureTime'] // 100)
-        cv2.setTrackbarPos('Analogue Gain', 'Controls', defaults['AnalogueGain'])
-        cv2.setTrackbarPos('Brightness', 'Controls', defaults['Brightness'])
-        cv2.setTrackbarPos('Contrast', 'Controls', defaults['Contrast'])
-        cv2.setTrackbarPos('Saturation', 'Controls', defaults['Saturation'])
-        cv2.setTrackbarPos('Sharpness', 'Controls', defaults['Sharpness'])
-        
-        self.apply_camera_settings()
-        print("[INFO] Parameters reset to defaults")
+        finally:
+            # Always release the requests
+            req0.release()
+            req1.release()
 
-    def save_settings(self):
-        """Save current settings to file"""
-        try:
-            with open('opencv_camera_settings.json', 'w') as f:
-                json.dump(self.params, f, indent=4)
-            print("[SUCCESS] Settings saved")
-        except Exception as e:
-            print(f"[ERROR] Failed to save settings: {e}")
+    def update_preview(self):
+        frame0 = self.cam0.capture_array()
+        frame1 = self.cam1.capture_array()
 
-    def load_settings(self):
-        """Load settings from file"""
-        try:
-            if os.path.exists('opencv_camera_settings.json'):
-                with open('opencv_camera_settings.json', 'r') as f:
-                    saved_params = json.load(f)
-                    
-                self.params.update(saved_params)
-                
-                # Update trackbars
-                cv2.setTrackbarPos('Exposure Time (x100)', 'Controls', self.params['ExposureTime'] // 100)
-                cv2.setTrackbarPos('Analogue Gain', 'Controls', self.params['AnalogueGain'])
-                cv2.setTrackbarPos('Brightness', 'Controls', self.params['Brightness'])
-                cv2.setTrackbarPos('Contrast', 'Controls', self.params['Contrast'])
-                cv2.setTrackbarPos('Saturation', 'Controls', self.params['Saturation'])
-                cv2.setTrackbarPos('Sharpness', 'Controls', self.params['Sharpness'])
-                
-                self.apply_camera_settings()
-                print("[SUCCESS] Loaded previous settings")
-                
-        except Exception as e:
-            print(f"[WARNING] Failed to load settings: {e}")
+        # Apply cropping to preview if enabled
+        if self.apply_cropping:
+            frame0_display = self.crop_image(frame0, 'cam0')
+            frame1_display = self.crop_image(frame1, 'cam1')
+        else:
+            frame0_display = frame0
+            frame1_display = frame1
+
+        display0 = cv2.resize(frame0_display, (640, 480))
+        display1 = cv2.resize(frame1_display, (640, 480))
+        combined = np.hstack((display0, display1))
+
+        y = 30
+        for param_name, param_data in self.params.items():
+            text = f"{param_name}: {param_data['value']:.2f}"
+            cv2.putText(combined, text, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            y += 20
+
+        # Add processing status
+        crop_status = "ON" if self.apply_cropping else "OFF"
+        distort_status = "ON" if self.enable_distortion_correction else "OFF"
+        cv2.putText(combined, f"Crop: {crop_status}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if self.apply_cropping else (0, 0, 255), 1)
+        y += 20
+        cv2.putText(combined, f"Distortion: {distort_status}", (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0) if self.enable_distortion_correction else (0, 0, 255), 1)
+
+        cv2.imshow('Dual Camera Preview', combined)
+        cv2.waitKey(1)
+        self.root.after(100, self.update_preview)
 
     def run(self):
-        """Main loop for camera display"""
-        print("\n" + "="*60)
-        print("Simple OpenCV Dual Camera Viewer")
-        print("="*60)
-        print("Controls:")
-        print("  S - Save images (DNG + TIFF)")
-        print("  R - Reset parameters to defaults")
-        print("  Q - Quit application")
-        print("  Use trackbars in Controls window to adjust camera settings")
-        print("="*60 + "\n")
-        
-        while True:
-            # Update control window
-            self.update_control_window()
-            
-            # Capture and display camera 0
-            if self.cam0_connected and self.cam0 is not None:
-                try:
-                    frame0 = self.cam0.capture_array()
-                    frame0_resized = cv2.resize(frame0, (800, 600))
-                    frame0_with_overlay = self.add_overlay_text(frame0_resized, "Camera 0", True)
-                    cv2.imshow('Camera 0', frame0_with_overlay)
-                except Exception as e:
-                    print(f"[WARNING] Camera 0 capture failed: {e}")
-                    self.cam0_connected = False
-            else:
-                # Show disconnected placeholder
-                placeholder0 = np.zeros((600, 800, 3), dtype=np.uint8)
-                placeholder0 = self.add_overlay_text(placeholder0, "Camera 0", False)
-                cv2.imshow('Camera 0', placeholder0)
-            
-            # Capture and display camera 1
-            if self.cam1_connected and self.cam1 is not None:
-                try:
-                    frame1 = self.cam1.capture_array()
-                    frame1_resized = cv2.resize(frame1, (800, 600))
-                    frame1_with_overlay = self.add_overlay_text(frame1_resized, "Camera 1", True)
-                    cv2.imshow('Camera 1', frame1_with_overlay)
-                except Exception as e:
-                    print(f"[WARNING] Camera 1 capture failed: {e}")
-                    self.cam1_connected = False
-            else:
-                # Show disconnected placeholder
-                placeholder1 = np.zeros((600, 800, 3), dtype=np.uint8)
-                placeholder1 = self.add_overlay_text(placeholder1, "Camera 1", False)
-                cv2.imshow('Camera 1', placeholder1)
-            
-            # Handle keyboard input
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('q') or key == ord('Q'):
-                print("\nQuitting application...")
-                break
-            elif key == ord('s') or key == ord('S'):
-                print("\nSaving images...")
-                self.save_images()
-            elif key == ord('r') or key == ord('R'):
-                print("\nResetting parameters...")
-                self.reset_parameters()
-        
-        # Cleanup
-        self.cleanup()
+        self.update_preview()
+        self.root.mainloop()
 
     def cleanup(self):
-        """Clean up resources"""
-        print("Cleaning up...")
-        
-        # Save settings
         self.save_settings()
-        
-        # Stop cameras
-        try:
-            if self.cam0 is not None and self.cam0_connected:
-                self.cam0.stop()
-        except Exception as e:
-            print(f"[WARNING] Error stopping camera 0: {e}")
-            
-        try:
-            if self.cam1 is not None and self.cam1_connected:
-                self.cam1.stop()
-        except Exception as e:
-            print(f"[WARNING] Error stopping camera 1: {e}")
-        
-        # Close OpenCV windows
+        self.cam0.stop()
+        self.cam1.stop()
         cv2.destroyAllWindows()
-        print("Cleanup complete!")
 
+    def on_scale_change(self, param_name):
+        value = float(self.scales[param_name].get())
+        self.entries[param_name].delete(0, tk.END)
+        self.entries[param_name].insert(0, f"{value:.2f}")
+        self.params[param_name]['value'] = value
+        self.apply_settings()
 
-def main():
-    """Main entry point"""
-    try:
-        print("Initializing Simple OpenCV Dual Camera Viewer...")
-        viewer = SimpleOpenCVCameraViewer()
-        viewer.run()
-        return 0
+    def on_entry_change(self, param_name):
+        try:
+            value = float(self.entries[param_name].get())
+            param_range = self.params[param_name]
+            if param_range['min'] <= value <= param_range['max']:
+                self.scales[param_name].set(value)
+                self.params[param_name]['value'] = value
+                self.apply_settings()
+            else:
+                self.entries[param_name].delete(0, tk.END)
+                self.entries[param_name].insert(0, f"{self.scales[param_name].get():.2f}")
+        except ValueError:
+            self.entries[param_name].delete(0, tk.END)
+            self.entries[param_name].insert(0, f"{self.scales[param_name].get():.2f}")
+
+    def reset_parameter(self, param_name):
+        default_value = self.defaults[param_name]
+        self.scales[param_name].set(default_value)
+        self.entries[param_name].delete(0, tk.END)
+        self.entries[param_name].insert(0, f"{default_value:.2f}")
+        self.params[param_name]['value'] = default_value
+        self.apply_settings()
+
+    def reset_all(self):
+        for param_name in self.params:
+            self.reset_parameter(param_name)
+
+    def save_settings(self):
+        settings = {param: self.params[param]['value'] for param in self.params}
+        try:
+            with open('camera_settings.json', 'w') as f:
+                json.dump(settings, f, indent=4)
+            print("Settings saved successfully")
+        except Exception as e:
+            print(f"Failed to save settings: {e}")
+
+    def load_settings(self):
+        try:
+            if os.path.exists('camera_settings.json'):
+                with open('camera_settings.json', 'r') as f:
+                    settings = json.load(f)
+                for param, value in settings.items():
+                    if param in self.params:
+                        self.params[param]['value'] = value
+                for param_name, value in settings.items():
+                    if param_name in self.scales:
+                        self.scales[param_name].set(value)
+                    if param_name in self.entries:
+                        self.entries[param_name].delete(0, tk.END)
+                        self.entries[param_name].insert(0, f"{value:.2f}")
+                self.apply_settings()
+                print("Loaded previous settings")
+        except Exception as e:
+            print(f"Failed to load settings: {e}")
+
+    def load_distortion_coefficients(self):
+        """Load distortion correction coefficients from files or use defaults"""
+        # First try to load from saved local files
+        local_coeff_file = 'distortion_coefficients.json'
+        if os.path.exists(local_coeff_file):
+            try:
+                with open(local_coeff_file, 'r') as f:
+                    saved_params = json.load(f)
+                    self.distortion_params.update(saved_params)
+                    print("[SUCCESS] Loaded distortion coefficients from saved file")
+                    return
+            except Exception as e:
+                print(f"[WARNING] Failed to load saved coefficients: {e}")
         
-    except KeyboardInterrupt:
-        print("\nApplication interrupted by user")
-        return 0
-    except Exception as e:
-        print(f"Error occurred: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return 1
+        # Try to load from original file paths
+        coeff_files = {
+            'cam0': 'RPI/Lensation_Calib_Photos/Right_Calib/coefficients_radial_distortion.txt',
+            'cam1': 'RPI/Lensation_Calib_Photos/Left_Calib/coefficients_radial_distortion.txt'
+        }
+        
+        files_found = False
+        for cam, filepath in coeff_files.items():
+            try:
+                if os.path.exists(filepath):
+                    with open(filepath, 'r') as f:
+                        lines = f.readlines()
+                        xcenter = float(lines[0].split('=')[1].strip())
+                        ycenter = float(lines[1].split('=')[1].strip())
+                        coeffs = []
+                        for i in range(2, len(lines)):
+                            if lines[i].strip():
+                                coeffs.append(float(lines[i].split('=')[1].strip()))
+                        
+                        self.distortion_params[cam]['xcenter'] = xcenter
+                        self.distortion_params[cam]['ycenter'] = ycenter
+                        self.distortion_params[cam]['coeffs'] = coeffs
+                        print(f"[SUCCESS] Loaded distortion coefficients for {cam} from original file")
+                        files_found = True
+                else:
+                    print(f"[WARNING] Coefficient file not found for {cam}: {filepath}")
+            except Exception as e:
+                print(f"[ERROR] Failed to load coefficients for {cam}: {e}")
+        
+        if files_found:
+            # Save the loaded coefficients for future use
+            self.save_distortion_coefficients()
+        else:
+            print("[INFO] Using default distortion coefficients (no calibration files found)")
+            print(f"   Cam0 (Left): center=({self.distortion_params['cam0']['xcenter']:.1f}, {self.distortion_params['cam0']['ycenter']:.1f})")
+            print(f"   Cam1 (Right): center=({self.distortion_params['cam1']['xcenter']:.1f}, {self.distortion_params['cam1']['ycenter']:.1f})")
 
+    def crop_image(self, image, cam_name):
+        """Crop image according to camera-specific parameters"""
+        if not self.apply_cropping:
+            return image
+            
+        params = self.crop_params[cam_name]
+        start_x = params['start_x']
+        width = params['width']
+        height = params['height']
+        
+        # Crop the image: [y_start:y_end, x_start:x_end]
+        cropped = image[:height, start_x:start_x + width]
+        return cropped
+
+    def apply_distortion_correction(self, image, cam_name):
+        """Apply distortion correction to the image"""
+        if not self.enable_distortion_correction:
+            return image
+            
+        params = self.distortion_params[cam_name]
+        xcenter = params['xcenter']
+        ycenter = params['ycenter']
+        coeffs = params['coeffs']
+        
+        # Adjust center coordinates for cropped image if cropping is applied
+        if self.apply_cropping:
+            crop_params = self.crop_params[cam_name]
+            xcenter = xcenter - crop_params['start_x']
+        
+        try:
+            # Store original data type and range
+            original_dtype = image.dtype
+            original_min = image.min()
+            original_max = image.max()
+            
+            # Convert to float for processing if needed
+            if image.dtype != np.float64:
+                image_float = image.astype(np.float64)
+            else:
+                image_float = image.copy()
+            
+            if image_float.ndim == 2:
+                # Grayscale image
+                corrected = post.unwarp_image_backward(image_float, xcenter, ycenter, coeffs)
+            else:
+                # Multi-channel image
+                corrected = np.zeros_like(image_float)
+                for c in range(image_float.shape[2]):
+                    corrected[:, :, c] = post.unwarp_image_backward(image_float[:, :, c], xcenter, ycenter, coeffs)
+            
+            # Handle potential NaN or infinite values
+            corrected = np.nan_to_num(corrected, nan=0.0, posinf=original_max, neginf=0.0)
+            
+            # Clip to reasonable range based on original data
+            corrected = np.clip(corrected, 0, original_max * 1.1)  # Allow slight overflow
+            
+            # Convert back to original data type
+            if original_dtype == np.uint8:
+                corrected = np.clip(corrected, 0, 255).astype(np.uint8)
+            elif original_dtype == np.uint16:
+                corrected = np.clip(corrected, 0, 65535).astype(np.uint16)
+            else:
+                corrected = corrected.astype(original_dtype)
+            
+            print(f"[DEBUG] Distortion correction for {cam_name}: input range [{original_min}, {original_max}], output range [{corrected.min()}, {corrected.max()}]")
+            
+            return corrected
+            
+        except Exception as e:
+            print(f"[ERROR] Distortion correction failed for {cam_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return image
+
+    def toggle_cropping(self):
+        """Toggle cropping on/off"""
+        self.apply_cropping = self.crop_var.get()
+        print(f"Cropping: {'ON' if self.apply_cropping else 'OFF'}")
+
+    def toggle_distortion_correction(self):
+        """Toggle distortion correction on/off"""
+        self.enable_distortion_correction = self.distortion_var.get()
+        print(f"Distortion correction: {'ON' if self.enable_distortion_correction else 'OFF'}")
+
+    def update_distortion_params(self, cam_name, xcenter, ycenter, coeffs):
+        """Update distortion parameters for a specific camera"""
+        self.distortion_params[cam_name]['xcenter'] = xcenter
+        self.distortion_params[cam_name]['ycenter'] = ycenter
+        self.distortion_params[cam_name]['coeffs'] = coeffs
+        print(f"[SUCCESS] Updated distortion parameters for {cam_name}")
+
+    def update_crop_params(self, cam_name, width, start_x, height=2592):
+        """Update crop parameters for a specific camera"""
+        self.crop_params[cam_name]['width'] = width
+        self.crop_params[cam_name]['start_x'] = start_x
+        self.crop_params[cam_name]['height'] = height
+        print(f"[SUCCESS] Updated crop parameters for {cam_name}: {width}x{height} @ ({start_x},0)")
+
+    def upload_calibration_file(self, cam_name):
+        """Upload and parse a calibration file for the specified camera"""
+        cam_label = "Left" if cam_name == "cam0" else "Right"
+        
+        # Open file dialog
+        file_path = filedialog.askopenfilename(
+            title=f"Select {cam_label} Camera Calibration File",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not file_path:
+            return  # User cancelled
+        
+        try:
+            # Parse the calibration file
+            with open(file_path, 'r') as f:
+                lines = f.readlines()
+                
+            # Extract parameters (assuming format: parameter=value)
+            xcenter = None
+            ycenter = None
+            coeffs = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                    
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip().lower()
+                    value = value.strip()
+                    
+                    if 'xcenter' in key or 'x_center' in key or 'centerx' in key:
+                        xcenter = float(value)
+                    elif 'ycenter' in key or 'y_center' in key or 'centery' in key:
+                        ycenter = float(value)
+                    elif 'coeff' in key or 'k' in key:
+                        coeffs.append(float(value))
+            
+            # Validate that we got the required parameters
+            if xcenter is None or ycenter is None or not coeffs:
+                messagebox.showerror("Error", 
+                    "Could not parse calibration file. Expected format:\n"
+                    "xcenter=value\n"
+                    "ycenter=value\n"
+                    "coeff1=value\n"
+                    "coeff2=value\n"
+                    "...")
+                return
+            
+            # Update the distortion parameters
+            self.distortion_params[cam_name]['xcenter'] = xcenter
+            self.distortion_params[cam_name]['ycenter'] = ycenter
+            self.distortion_params[cam_name]['coeffs'] = coeffs
+            
+            # Save the updated coefficients
+            self.save_distortion_coefficients()
+            
+            messagebox.showinfo("Success", 
+                f"[SUCCESS] Loaded calibration for {cam_label} camera ({cam_name})\n"
+                f"Center: ({xcenter:.1f}, {ycenter:.1f})\n"
+                f"Coefficients: {len(coeffs)} values")
+            
+            print(f"[SUCCESS] Updated distortion parameters for {cam_name} from uploaded file")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load calibration file:\n{str(e)}")
+            print(f"[ERROR] Failed to load calibration file for {cam_name}: {e}")
+
+    def save_distortion_coefficients(self):
+        """Save current distortion coefficients to a local file"""
+        try:
+            with open('distortion_coefficients.json', 'w') as f:
+                json.dump(self.distortion_params, f, indent=4)
+            print("[SUCCESS] Saved distortion coefficients to local file")
+        except Exception as e:
+            print(f"[ERROR] Failed to save distortion coefficients: {e}")
+
+    def show_distortion_parameters(self):
+        """Show current distortion parameters"""
+        # Print to console
+        print("Current distortion parameters:")
+        for cam, params in self.distortion_params.items():
+            cam_label = "Left" if cam == "cam0" else "Right"
+            print(f"   {cam} ({cam_label}):")
+            print(f"      xcenter: {params['xcenter']:.4f}")
+            print(f"      ycenter: {params['ycenter']:.4f}")
+            print(f"      coeffs: {params['coeffs']}")
+        
+        # Show in message box
+        info_text = "Current Distortion Parameters:\n\n"
+        for cam, params in self.distortion_params.items():
+            cam_label = "Left" if cam == "cam0" else "Right"
+            info_text += f"{cam_label} Camera ({cam}):\n"
+            info_text += f"  Center: ({params['xcenter']:.1f}, {params['ycenter']:.1f})\n"
+            info_text += f"  Coefficients: {len(params['coeffs'])} values\n"
+            info_text += f"  {params['coeffs']}\n\n"
+        
+        messagebox.showinfo("Distortion Parameters", info_text)
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(main())
+    viewer = DualIMX708Viewer()
+    try:
+        viewer.run()
+    finally:
+        viewer.cleanup() 
