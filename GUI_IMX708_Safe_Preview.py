@@ -381,36 +381,165 @@ class UltraSafeIMX708Viewer:
         
         ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
         
         # Emergency stop button
         ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
 
-        # Processing options
-        processing_frame = ttk.LabelFrame(control_frame, text="Save Options")
-        processing_frame.pack(fill=tk.X, pady=(0, 10))
+        # Processing options - Save Options
+        save_frame = ttk.LabelFrame(control_frame, text="Save Options")
+        save_frame.pack(fill=tk.X, pady=(0, 10))
 
         self.save_tiff_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(processing_frame, text="Save Combined TIFF", 
+        ttk.Checkbutton(save_frame, text="Save Combined TIFF", 
                        variable=self.save_tiff_var).pack(anchor=tk.W, padx=5, pady=2)
 
         self.save_dng_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(processing_frame, text="Save Original DNG Files", 
+        ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
                        variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
 
-        # Processing controls
-        processing_controls_frame = ttk.LabelFrame(processing_frame, text="Processing Controls")
-        processing_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+        # Processing controls - Main Processing Options
+        processing_frame = ttk.LabelFrame(control_frame, text="Processing Controls")
+        processing_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Create a notebook for organized tabs
+        processing_notebook = ttk.Notebook(processing_frame)
+        processing_notebook.pack(fill=tk.X, padx=5, pady=5)
+        
+        # Tab 1: Basic Processing Options
+        basic_tab = ttk.Frame(processing_notebook)
+        processing_notebook.add(basic_tab, text="Basic")
+        
+        # Basic processing checkboxes
+        self.cropping_var = tk.BooleanVar(value=self.apply_cropping)
+        ttk.Checkbutton(basic_tab, text="Apply Cropping", 
+                       variable=self.cropping_var,
+                       command=self.update_cropping_setting).pack(anchor=tk.W, padx=5, pady=2)
+        
+        self.distortion_var = tk.BooleanVar(value=self.enable_distortion_correction)
+        ttk.Checkbutton(basic_tab, text="Apply Radial Distortion Correction", 
+                       variable=self.distortion_var,
+                       command=self.update_distortion_setting).pack(anchor=tk.W, padx=5, pady=2)
         
         self.perspective_var = tk.BooleanVar(value=self.enable_perspective_correction)
-        ttk.Checkbutton(processing_controls_frame, text="Enable Perspective Correction", 
+        ttk.Checkbutton(basic_tab, text="Enable Perspective Correction", 
                        variable=self.perspective_var,
                        command=self.update_perspective_setting).pack(anchor=tk.W, padx=5, pady=2)
         
+        # Left rotation controls
+        left_rot_frame = ttk.Frame(basic_tab)
+        left_rot_frame.pack(fill=tk.X, padx=5, pady=2)
+        
+        self.left_rotation_var = tk.BooleanVar(value=self.apply_left_rotation)
+        ttk.Checkbutton(left_rot_frame, text="Left Image Rotation:", 
+                       variable=self.left_rotation_var,
+                       command=self.update_left_rotation_setting).pack(side=tk.LEFT)
+        
+        self.left_angle_var = tk.DoubleVar(value=self.left_rotation_angle)
+        left_angle_entry = ttk.Entry(left_rot_frame, textvariable=self.left_angle_var, width=8)
+        left_angle_entry.pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(left_rot_frame, text="°").pack(side=tk.LEFT)
+        
+        # Right rotation controls
+        right_rot_frame = ttk.Frame(basic_tab)
+        right_rot_frame.pack(fill=tk.X, padx=5, pady=2)
+        
         self.right_rotation_var = tk.BooleanVar(value=self.apply_right_rotation)
-        ttk.Checkbutton(processing_controls_frame, text="Enable Right Image Rotation", 
+        ttk.Checkbutton(right_rot_frame, text="Right Image Rotation:", 
                        variable=self.right_rotation_var,
-                       command=self.update_right_rotation_setting).pack(anchor=tk.W, padx=5, pady=2)
+                       command=self.update_right_rotation_setting).pack(side=tk.LEFT)
+        
+        self.right_angle_var = tk.DoubleVar(value=self.right_rotation_angle)
+        right_angle_entry = ttk.Entry(right_rot_frame, textvariable=self.right_angle_var, width=8)
+        right_angle_entry.pack(side=tk.LEFT, padx=(5, 0))
+        ttk.Label(right_rot_frame, text="°").pack(side=tk.LEFT)
+        
+        # Tab 2: Distortion Padding
+        padding_tab = ttk.Frame(processing_notebook)
+        processing_notebook.add(padding_tab, text="Padding")
+        
+        ttk.Label(padding_tab, text="Distortion Correction Padding (pixels):").pack(anchor=tk.W, padx=5, pady=(5, 2))
+        ttk.Label(padding_tab, text="Higher values preserve more content but may add artifacts").pack(anchor=tk.W, padx=5, pady=(0, 5))
+        
+        # Left camera padding
+        left_pad_frame = ttk.LabelFrame(padding_tab, text="Left Camera (cam0)")
+        left_pad_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        left_pad_row1 = ttk.Frame(left_pad_frame)
+        left_pad_row1.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(left_pad_row1, text="Top:").pack(side=tk.LEFT)
+        self.left_top_padding_var = tk.IntVar(value=self.left_top_padding)
+        left_top_entry = ttk.Entry(left_pad_row1, textvariable=self.left_top_padding_var, width=8)
+        left_top_entry.pack(side=tk.LEFT, padx=(5, 20))
+        
+        ttk.Label(left_pad_row1, text="Bottom:").pack(side=tk.LEFT)
+        self.left_bottom_padding_var = tk.IntVar(value=self.left_bottom_padding)
+        left_bottom_entry = ttk.Entry(left_pad_row1, textvariable=self.left_bottom_padding_var, width=8)
+        left_bottom_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Right camera padding
+        right_pad_frame = ttk.LabelFrame(padding_tab, text="Right Camera (cam1)")
+        right_pad_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        right_pad_row1 = ttk.Frame(right_pad_frame)
+        right_pad_row1.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(right_pad_row1, text="Top:").pack(side=tk.LEFT)
+        self.right_top_padding_var = tk.IntVar(value=self.right_top_padding)
+        right_top_entry = ttk.Entry(right_pad_row1, textvariable=self.right_top_padding_var, width=8)
+        right_top_entry.pack(side=tk.LEFT, padx=(5, 20))
+        
+        ttk.Label(right_pad_row1, text="Bottom:").pack(side=tk.LEFT)
+        self.right_bottom_padding_var = tk.IntVar(value=self.right_bottom_padding)
+        right_bottom_entry = ttk.Entry(right_pad_row1, textvariable=self.right_bottom_padding_var, width=8)
+        right_bottom_entry.pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Tab 3: Crop Parameters
+        crop_tab = ttk.Frame(processing_notebook)
+        processing_notebook.add(crop_tab, text="Crop")
+        
+        ttk.Label(crop_tab, text="Cropping Parameters:").pack(anchor=tk.W, padx=5, pady=(5, 2))
+        
+        # Left camera crop
+        left_crop_frame = ttk.LabelFrame(crop_tab, text="Left Camera (cam0)")
+        left_crop_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        left_crop_row1 = ttk.Frame(left_crop_frame)
+        left_crop_row1.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(left_crop_row1, text="Width:").pack(side=tk.LEFT)
+        self.left_width_var = tk.IntVar(value=self.crop_params['cam0']['width'])
+        ttk.Entry(left_crop_row1, textvariable=self.left_width_var, width=8).pack(side=tk.LEFT, padx=(5, 15))
+        
+        ttk.Label(left_crop_row1, text="Start X:").pack(side=tk.LEFT)
+        self.left_start_x_var = tk.IntVar(value=self.crop_params['cam0']['start_x'])
+        ttk.Entry(left_crop_row1, textvariable=self.left_start_x_var, width=8).pack(side=tk.LEFT, padx=(5, 15))
+        
+        ttk.Label(left_crop_row1, text="Height:").pack(side=tk.LEFT)
+        self.left_height_var = tk.IntVar(value=self.crop_params['cam0']['height'])
+        ttk.Entry(left_crop_row1, textvariable=self.left_height_var, width=8).pack(side=tk.LEFT, padx=(5, 0))
+        
+        # Right camera crop
+        right_crop_frame = ttk.LabelFrame(crop_tab, text="Right Camera (cam1)")
+        right_crop_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        right_crop_row1 = ttk.Frame(right_crop_frame)
+        right_crop_row1.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Label(right_crop_row1, text="Width:").pack(side=tk.LEFT)
+        self.right_width_var = tk.IntVar(value=self.crop_params['cam1']['width'])
+        ttk.Entry(right_crop_row1, textvariable=self.right_width_var, width=8).pack(side=tk.LEFT, padx=(5, 15))
+        
+        ttk.Label(right_crop_row1, text="Start X:").pack(side=tk.LEFT)
+        self.right_start_x_var = tk.IntVar(value=self.crop_params['cam1']['start_x'])
+        ttk.Entry(right_crop_row1, textvariable=self.right_start_x_var, width=8).pack(side=tk.LEFT, padx=(5, 15))
+        
+        ttk.Label(right_crop_row1, text="Height:").pack(side=tk.LEFT)
+        self.right_height_var = tk.IntVar(value=self.crop_params['cam1']['height'])
+        ttk.Entry(right_crop_row1, textvariable=self.right_height_var, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
         # Preview display (top right)
         preview_frame = ttk.LabelFrame(right_frame, text="Camera Preview")
@@ -765,6 +894,10 @@ class UltraSafeIMX708Viewer:
         """Worker thread for image saving"""
         try:
             self.operation_in_progress = True
+            
+            # Update processing settings from GUI before saving
+            self.get_current_processing_settings()
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             params_str = "_".join(f"{p}{v['value']:.2f}" for p, v in self.params.items())
 
@@ -774,7 +907,7 @@ class UltraSafeIMX708Viewer:
             
             if self.cam0_connected:
                 self.log_message("📸 Capturing from Camera 0...")
-                req0 = self.safe_camera_operation(lambda cam: cam.capture_request(), self.cam0)
+                req0 = self.cam0.capture_request()
                 if req0:
                     self.log_message("✓ Camera 0 captured successfully")
                 else:
@@ -782,7 +915,7 @@ class UltraSafeIMX708Viewer:
                     
             if self.cam1_connected:
                 self.log_message("📸 Capturing from Camera 1...")
-                req1 = self.safe_camera_operation(lambda cam: cam.capture_request(), self.cam1)
+                req1 = self.cam1.capture_request()
                 if req1:
                     self.log_message("✓ Camera 1 captured successfully")
                 else:
@@ -867,9 +1000,16 @@ class UltraSafeIMX708Viewer:
                 self.log_message(f"Processing pipeline applied:")
                 self.log_message(f"   ✓ Cropping: {'Applied' if self.apply_cropping else 'Skipped'}")
                 self.log_message(f"   ✓ Radial Distortion: {'Applied' if self.enable_distortion_correction else 'Skipped'}")
+                if self.enable_distortion_correction:
+                    self.log_message(f"     - Left padding: {self.left_top_padding} top, {self.left_bottom_padding} bottom")
+                    self.log_message(f"     - Right padding: {self.right_top_padding} top, {self.right_bottom_padding} bottom")
                 self.log_message(f"   ✓ Perspective Correction: {'Applied' if self.enable_perspective_correction else 'Skipped'}")
                 self.log_message(f"   ✓ Left Rotation: {'Applied' if self.apply_left_rotation else 'Skipped'}")
+                if self.apply_left_rotation:
+                    self.log_message(f"     - Angle: {self.left_rotation_angle}°")
                 self.log_message(f"   ✓ Right Rotation: {'Applied' if self.apply_right_rotation else 'Skipped'}")
+                if self.apply_right_rotation:
+                    self.log_message(f"     - Angle: {self.right_rotation_angle}°")
 
         except Exception as e:
             self.log_message(f"❌ Save operation error: {e}")
@@ -1110,7 +1250,7 @@ class UltraSafeIMX708Viewer:
             else:
                 pil_image = Image.fromarray(image, mode='L')
             
-            # Apply rotation
+            # Apply rotation (negative because PIL rotates counter-clockwise)
             rotated_pil = pil_image.rotate(-self.left_rotation_angle, expand=False, fillcolor=0)
             
             # Convert back to numpy array
@@ -1135,7 +1275,7 @@ class UltraSafeIMX708Viewer:
             else:
                 pil_image = Image.fromarray(image, mode='L')
             
-            # Apply rotation
+            # Apply rotation (negative because PIL rotates counter-clockwise)
             rotated_pil = pil_image.rotate(-self.right_rotation_angle, expand=False, fillcolor=0)
             
             # Convert back to numpy array
@@ -1280,9 +1420,13 @@ class UltraSafeIMX708Viewer:
         except Exception as e:
             self.log_message(f"Failed to load settings: {e}")
 
-    def load_distortion_coefficients(self):
+    def load_distortion_coefficients(self, filepath=None):
         """Load distortion correction coefficients"""
-        dual_coeff_file = 'distortion_coefficients_dual.json'
+        if filepath is None:
+            dual_coeff_file = 'distortion_coefficients_dual.json'
+        else:
+            dual_coeff_file = filepath
+            
         if os.path.exists(dual_coeff_file):
             try:
                 with open(dual_coeff_file, 'r') as f:
@@ -1297,22 +1441,203 @@ class UltraSafeIMX708Viewer:
                             if key in saved_params[cam]:
                                 self.distortion_params[cam][key] = saved_params[cam][key]
                 
-                self.log_message(f"Loaded coefficients from {dual_coeff_file}")
-                return
+                self.log_message(f"Loaded coefficients from {os.path.basename(dual_coeff_file)}")
+                return True
             except Exception as e:
                 self.log_message(f"Failed to load coefficients: {e}")
+                return False
+        else:
+            if filepath is None:
+                self.log_message("Using built-in default coefficients")
+            else:
+                self.log_message(f"Coefficients file not found: {dual_coeff_file}")
+            return False
+
+    def load_coefficients_dialog(self):
+        """Load distortion coefficients from file dialog"""
+        from tkinter import filedialog
         
-        self.log_message("Using built-in default coefficients")
+        coeff_file = filedialog.askopenfilename(
+            title="Select Distortion Coefficients JSON File",
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*")
+            ]
+        )
+        
+        if not coeff_file:
+            return
+        
+        # Try to load the coefficients
+        success = self.load_distortion_coefficients(coeff_file)
+        
+        if success:
+            self.log_message(f"✓ Loaded coefficients from {os.path.basename(coeff_file)}")
+            messagebox.showinfo("Success", f"Distortion coefficients loaded successfully from:\n{os.path.basename(coeff_file)}")
+        else:
+            self.log_message(f"✗ Failed to load coefficients from {os.path.basename(coeff_file)}")
+            messagebox.showerror("Error", f"Failed to load coefficients from:\n{os.path.basename(coeff_file)}\n\nCheck log for details.")
+
+    def show_processing_info(self):
+        """Show detailed processing information in a dialog"""
+        # Update current settings from GUI
+        self.get_current_processing_settings()
+        
+        # Create info window
+        info_window = tk.Toplevel(self.root)
+        info_window.title("Processing Information & Coefficients")
+        info_window.geometry("800x600")
+        
+        # Create text widget with scrollbar
+        text_frame = ttk.Frame(info_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        info_text = tk.Text(text_frame, wrap=tk.WORD, font=('Consolas', 9))
+        scrollbar = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=info_text.yview)
+        info_text.configure(yscrollcommand=scrollbar.set)
+        
+        info_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Generate processing info
+        info_content = self.generate_processing_info()
+        info_text.insert(tk.END, info_content)
+        info_text.config(state=tk.DISABLED)
+        
+        # Close button
+        ttk.Button(info_window, text="Close", command=info_window.destroy).pack(pady=10)
+
+    def generate_processing_info(self):
+        """Generate detailed processing information text"""
+        info = []
+        
+        info.append("=== PROCESSING PIPELINE STATUS ===\n")
+        info.append(f"✓ Cropping: {'Enabled' if self.apply_cropping else 'Disabled'}\n")
+        info.append(f"✓ Radial Distortion Correction: {'Enabled' if self.enable_distortion_correction else 'Disabled'}\n")
+        info.append(f"✓ Perspective Correction: {'Enabled' if self.enable_perspective_correction else 'Disabled'}\n")
+        info.append(f"✓ Left Image Rotation: {'Enabled' if self.apply_left_rotation else 'Disabled'}\n")
+        info.append(f"✓ Right Image Rotation: {'Enabled' if self.apply_right_rotation else 'Disabled'}\n")
+        info.append("\n")
+        
+        info.append("=== ROTATION PARAMETERS ===\n")
+        info.append(f"Left Image (cam0): {self.left_rotation_angle}°\n")
+        info.append(f"Right Image (cam1): {self.right_rotation_angle}°\n")
+        info.append("\n")
+        
+        info.append("=== DISTORTION PADDING ===\n")
+        info.append(f"Left Camera (cam0): {self.left_top_padding} top, {self.left_bottom_padding} bottom\n")
+        info.append(f"Right Camera (cam1): {self.right_top_padding} top, {self.right_bottom_padding} bottom\n")
+        info.append("(Higher values preserve more content but may add artifacts)\n")
+        info.append("\n")
+        
+        info.append("=== CROP PARAMETERS ===\n")
+        for cam, params in self.crop_params.items():
+            cam_label = "Left" if cam == "cam0" else "Right"
+            info.append(f"{cam} ({cam_label}):\n")
+            info.append(f"  Width: {params['width']} pixels\n")
+            info.append(f"  Start X: {params['start_x']} pixels\n")
+            info.append(f"  Height: {params['height']} pixels\n")
+            info.append(f"  Region: {params['width']}x{params['height']} @ ({params['start_x']},0)\n")
+            info.append("\n")
+        
+        info.append("=== RADIAL DISTORTION PARAMETERS ===\n")
+        for cam, params in self.distortion_params.items():
+            cam_label = "Left" if cam == "cam0" else "Right"
+            info.append(f"{cam} ({cam_label}):\n")
+            info.append(f"  Center: ({params['xcenter']:.3f}, {params['ycenter']:.3f})\n")
+            info.append(f"  Radial Coefficients:\n")
+            for i, coeff in enumerate(params['coeffs']):
+                info.append(f"    k{i+1}: {coeff:.8e}\n")
+            info.append("\n")
+        
+        info.append("=== PERSPECTIVE CORRECTION PARAMETERS ===\n")
+        for cam, params in self.distortion_params.items():
+            cam_label = "Left" if cam == "cam0" else "Right"
+            pers_coef = params.get('pers_coef')
+            info.append(f"{cam} ({cam_label}):\n")
+            
+            if pers_coef is not None:
+                info.append(f"  Status: Available\n")
+                info.append(f"  Perspective Coefficients:\n")
+                labels = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8']
+                for i, coeff in enumerate(pers_coef):
+                    if i < len(labels):
+                        info.append(f"    {labels[i]}: {coeff:.8e}\n")
+            else:
+                info.append(f"  Status: Not available\n")
+                info.append(f"  Note: Load coefficients file with perspective data\n")
+            info.append("\n")
+        
+        info.append("=== PROCESSING PIPELINE ===\n")
+        pipeline_steps = []
+        if self.apply_cropping:
+            pipeline_steps.append("1. Crop image to specified region")
+        if self.enable_distortion_correction:
+            pipeline_steps.append("2. Apply radial distortion correction with padding")
+        if self.enable_perspective_correction:
+            pipeline_steps.append("3. Apply perspective correction")
+        if self.apply_left_rotation or self.apply_right_rotation:
+            pipeline_steps.append("4. Apply rotation (if enabled for camera)")
+        
+        if pipeline_steps:
+            for step in pipeline_steps:
+                info.append(f"{step}\n")
+        else:
+            info.append("No processing steps enabled\n")
+        
+        return "".join(info)
+
+    def update_cropping_setting(self):
+        """Update cropping setting"""
+        self.apply_cropping = self.cropping_var.get()
+        self.log_message(f"Cropping {'enabled' if self.apply_cropping else 'disabled'}")
+
+    def update_distortion_setting(self):
+        """Update distortion correction setting"""
+        self.enable_distortion_correction = self.distortion_var.get()
+        self.log_message(f"Distortion correction {'enabled' if self.enable_distortion_correction else 'disabled'}")
 
     def update_perspective_setting(self):
         """Update perspective correction setting"""
         self.enable_perspective_correction = self.perspective_var.get()
         self.log_message(f"Perspective correction {'enabled' if self.enable_perspective_correction else 'disabled'}")
 
+    def update_left_rotation_setting(self):
+        """Update left rotation setting"""
+        self.apply_left_rotation = self.left_rotation_var.get()
+        self.log_message(f"Left image rotation {'enabled' if self.apply_left_rotation else 'disabled'}")
+
     def update_right_rotation_setting(self):
         """Update right rotation setting"""
         self.apply_right_rotation = self.right_rotation_var.get()
         self.log_message(f"Right image rotation {'enabled' if self.apply_right_rotation else 'disabled'}")
+
+    def get_current_processing_settings(self):
+        """Get current processing settings from GUI"""
+        # Update rotation angles from GUI
+        if hasattr(self, 'left_angle_var'):
+            self.left_rotation_angle = self.left_angle_var.get()
+        if hasattr(self, 'right_angle_var'):
+            self.right_rotation_angle = self.right_angle_var.get()
+        
+        # Update padding from GUI
+        if hasattr(self, 'left_top_padding_var'):
+            self.left_top_padding = self.left_top_padding_var.get()
+        if hasattr(self, 'left_bottom_padding_var'):
+            self.left_bottom_padding = self.left_bottom_padding_var.get()
+        if hasattr(self, 'right_top_padding_var'):
+            self.right_top_padding = self.right_top_padding_var.get()
+        if hasattr(self, 'right_bottom_padding_var'):
+            self.right_bottom_padding = self.right_bottom_padding_var.get()
+        
+        # Update crop parameters from GUI
+        if hasattr(self, 'left_width_var'):
+            self.crop_params['cam0']['width'] = self.left_width_var.get()
+            self.crop_params['cam0']['start_x'] = self.left_start_x_var.get()
+            self.crop_params['cam0']['height'] = self.left_height_var.get()
+            self.crop_params['cam1']['width'] = self.right_width_var.get()
+            self.crop_params['cam1']['start_x'] = self.right_start_x_var.get()
+            self.crop_params['cam1']['height'] = self.right_height_var.get()
 
 
 def main():
