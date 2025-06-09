@@ -293,7 +293,7 @@ class UltraSafeIMX708Viewer:
         self.root = tk.Tk()
         self.root.title("Safe Dual IMX708 Camera Control with Preview")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.root.geometry("1200x800")
+        self.root.geometry("1400x800")
 
         # Main frame
         main_frame = ttk.Frame(self.root)
@@ -306,107 +306,31 @@ class UltraSafeIMX708Viewer:
         self.status_label = ttk.Label(status_frame, text="Initializing...", font=('TkDefaultFont', 12, 'bold'))
         self.status_label.pack(pady=5)
 
-        # Create horizontal layout
+        # Create three-column horizontal layout
         content_frame = ttk.Frame(main_frame)
         content_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Control frame (left side)
+        # Left control frame (camera parameters and basic actions)
         control_frame = ttk.Frame(content_frame)
-        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-        control_frame.config(width=300)
+        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        control_frame.config(width=280)
 
-        # Preview and log frame (right side)
+        # Middle processing frame (processing controls tabs)
+        processing_main_frame = ttk.Frame(content_frame)
+        processing_main_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
+        processing_main_frame.config(width=350)
+
+        # Right frame (preview and log)
         right_frame = ttk.Frame(content_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self.entries = {}
-        self.scales = {}
-
-        # Camera parameter controls
-        params_frame = ttk.LabelFrame(control_frame, text="Camera Parameters")
-        params_frame.pack(fill=tk.X, pady=(0, 10))
-
-        for param_name, param_data in self.params.items():
-            frame = ttk.LabelFrame(params_frame, text=param_name)
-            frame.pack(fill=tk.X, padx=5, pady=2)
-
-            scale = ttk.Scale(
-                frame,
-                from_=param_data['min'],
-                to=param_data['max'],
-                value=param_data['value'],
-                orient=tk.HORIZONTAL
-            )
-            scale.pack(fill=tk.X, padx=5)
-            scale.bind("<ButtonRelease-1>", lambda e, p=param_name: self.on_scale_change(p))
-            self.scales[param_name] = scale
-
-            entry_frame = ttk.Frame(frame)
-            entry_frame.pack(fill=tk.X, padx=5)
-
-            entry = ttk.Entry(entry_frame, width=8)
-            entry.insert(0, str(param_data['value']))
-            entry.pack(side=tk.LEFT, padx=2)
-            entry.bind('<Return>', lambda e, p=param_name: self.on_entry_change(p))
-            self.entries[param_name] = entry
-
-            ttk.Button(entry_frame, text="Set", command=lambda p=param_name: self.on_entry_change(p)).pack(side=tk.LEFT, padx=2)
-            ttk.Button(entry_frame, text="Reset", command=lambda p=param_name: self.reset_parameter(p)).pack(side=tk.LEFT, padx=2)
-
-        # Action buttons
-        action_frame = ttk.LabelFrame(control_frame, text="Actions")
-        action_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Button(action_frame, text="💾 Save Images", command=self.safe_save_image).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="🧪 Test Single Capture", command=self.test_capture).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Preview controls
-        preview_controls_frame = ttk.LabelFrame(action_frame, text="Preview Controls")
-        preview_controls_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.preview_button = ttk.Button(preview_controls_frame, text="▶️ Start Preview", command=self.toggle_preview)
-        self.preview_button.pack(fill=tk.X, padx=5, pady=2)
-        
-        ttk.Button(preview_controls_frame, text="📷 Single Frame", command=self.capture_single_frame).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Frame rate control
-        rate_frame = ttk.Frame(preview_controls_frame)
-        rate_frame.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(rate_frame, text="FPS:").pack(side=tk.LEFT)
-        
-        self.fps_var = tk.StringVar(value="2")
-        fps_combo = ttk.Combobox(rate_frame, textvariable=self.fps_var, width=8, values=["0.5", "1", "2", "3", "5"])
-        fps_combo.pack(side=tk.RIGHT)
-        fps_combo.bind("<<ComboboxSelected>>", self.on_fps_change)
-        
-        ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Emergency stop button
-        ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
-
-        # Processing options - Save Options
-        save_frame = ttk.LabelFrame(control_frame, text="Save Options")
-        save_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.save_tiff_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(save_frame, text="Save Combined TIFF", 
-                       variable=self.save_tiff_var).pack(anchor=tk.W, padx=5, pady=2)
-
-        self.save_dng_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
-                       variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
-
-        # Processing controls - Main Processing Options
-        processing_frame = ttk.LabelFrame(control_frame, text="Processing Controls")
-        processing_frame.pack(fill=tk.X, pady=(0, 10))
+        # === MIDDLE PROCESSING FRAME - Processing Controls ===
+        processing_frame = ttk.LabelFrame(processing_main_frame, text="Processing Controls")
+        processing_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
         # Create a notebook for organized tabs
         processing_notebook = ttk.Notebook(processing_frame)
-        processing_notebook.pack(fill=tk.X, padx=5, pady=5)
+        processing_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Tab 1: Basic Processing Options
         basic_tab = ttk.Frame(processing_notebook)
@@ -541,12 +465,95 @@ class UltraSafeIMX708Viewer:
         self.right_height_var = tk.IntVar(value=self.crop_params['cam1']['height'])
         ttk.Entry(right_crop_row1, textvariable=self.right_height_var, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
+        self.entries = {}
+        self.scales = {}
+
+        # Camera parameter controls
+        params_frame = ttk.LabelFrame(control_frame, text="Camera Parameters")
+        params_frame.pack(fill=tk.X, pady=(0, 10))
+
+        for param_name, param_data in self.params.items():
+            frame = ttk.LabelFrame(params_frame, text=param_name)
+            frame.pack(fill=tk.X, padx=5, pady=2)
+
+            scale = ttk.Scale(
+                frame,
+                from_=param_data['min'],
+                to=param_data['max'],
+                value=param_data['value'],
+                orient=tk.HORIZONTAL
+            )
+            scale.pack(fill=tk.X, padx=5)
+            scale.bind("<ButtonRelease-1>", lambda e, p=param_name: self.on_scale_change(p))
+            self.scales[param_name] = scale
+
+            entry_frame = ttk.Frame(frame)
+            entry_frame.pack(fill=tk.X, padx=5)
+
+            entry = ttk.Entry(entry_frame, width=8)
+            entry.insert(0, str(param_data['value']))
+            entry.pack(side=tk.LEFT, padx=2)
+            entry.bind('<Return>', lambda e, p=param_name: self.on_entry_change(p))
+            self.entries[param_name] = entry
+
+            ttk.Button(entry_frame, text="Set", command=lambda p=param_name: self.on_entry_change(p)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(entry_frame, text="Reset", command=lambda p=param_name: self.reset_parameter(p)).pack(side=tk.LEFT, padx=2)
+
+        # Action buttons
+        action_frame = ttk.LabelFrame(control_frame, text="Actions")
+        action_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(action_frame, text="💾 Save Images", command=self.safe_save_image).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="🧪 Test Single Capture", command=self.test_capture).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Preview controls
+        preview_controls_frame = ttk.LabelFrame(action_frame, text="Preview Controls")
+        preview_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.preview_button = ttk.Button(preview_controls_frame, text="▶️ Start Preview", command=self.toggle_preview)
+        self.preview_button.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Button(preview_controls_frame, text="📷 Single Frame", command=self.capture_single_frame).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Frame rate control
+        rate_frame = ttk.Frame(preview_controls_frame)
+        rate_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(rate_frame, text="FPS:").pack(side=tk.LEFT)
+        
+        self.fps_var = tk.StringVar(value="2")
+        fps_combo = ttk.Combobox(rate_frame, textvariable=self.fps_var, width=8, values=["0.5", "1", "2", "3", "5"])
+        fps_combo.pack(side=tk.RIGHT)
+        fps_combo.bind("<<ComboboxSelected>>", self.on_fps_change)
+        
+        ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Emergency stop button
+        ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
+
+        # Processing options - Save Options
+        save_frame = ttk.LabelFrame(control_frame, text="Save Options")
+        save_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.save_tiff_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(save_frame, text="Save Combined TIFF", 
+                       variable=self.save_tiff_var).pack(anchor=tk.W, padx=5, pady=2)
+
+        self.save_dng_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
+                       variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
+
+
+
         # Preview display (top right)
         preview_frame = ttk.LabelFrame(right_frame, text="Camera Preview")
         preview_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Preview canvas
-        self.preview_canvas = tk.Canvas(preview_frame, width=640, height=240, bg='black')
+        # Preview canvas (smaller for three-column layout)
+        self.preview_canvas = tk.Canvas(preview_frame, width=480, height=180, bg='black')
         self.preview_canvas.pack(padx=5, pady=5)
         
         # Preview status
@@ -640,7 +647,7 @@ class UltraSafeIMX708Viewer:
         # Clear preview canvas
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(320, 120, text="Preview Stopped", fill="white", font=('Arial', 16))
+            self.preview_canvas.create_text(240, 90, text="Preview Stopped", fill="white", font=('Arial', 14))
         except:
             pass
 
@@ -716,8 +723,8 @@ class UltraSafeIMX708Viewer:
             self.preview_canvas.delete("all")
             
             # Process frames for preview (light processing without cv2)
-            display_width = 320
-            display_height = 240
+            display_width = 480
+            display_height = 180
             
             combined_image = None
             
@@ -776,13 +783,13 @@ class UltraSafeIMX708Viewer:
                     self.preview_photo = ImageTk.PhotoImage(pil_image)
                     
                     # Display on canvas
-                    self.preview_canvas.create_image(320, 120, image=self.preview_photo)
+                    self.preview_canvas.create_image(240, 90, image=self.preview_photo)
                     
                     # Add overlay text
                     cam0_status = "✓" if self.cam0_connected else "✗"
                     cam1_status = "✓" if self.cam1_connected else "✗"
                     overlay_text = f"Cam0: {cam0_status}  Cam1: {cam1_status}"
-                    self.preview_canvas.create_text(320, 20, text=overlay_text, fill="yellow", font=('Arial', 12, 'bold'))
+                    self.preview_canvas.create_text(240, 15, text=overlay_text, fill="yellow", font=('Arial', 10, 'bold'))
                     
         except Exception as e:
             self.log_message(f"❌ Preview display error: {e}")
@@ -792,8 +799,8 @@ class UltraSafeIMX708Viewer:
         """Show disconnected status in preview"""
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(320, 120, text="No Camera Data", fill="red", font=('Arial', 16))
-            self.preview_canvas.create_text(320, 150, text="Check camera connections", fill="white", font=('Arial', 12))
+            self.preview_canvas.create_text(240, 90, text="No Camera Data", fill="red", font=('Arial', 14))
+            self.preview_canvas.create_text(240, 110, text="Check camera connections", fill="white", font=('Arial', 10))
         except:
             pass
 
@@ -801,8 +808,8 @@ class UltraSafeIMX708Viewer:
         """Show error status in preview"""
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(320, 120, text="Preview Error", fill="red", font=('Arial', 16))
-            self.preview_canvas.create_text(320, 150, text="Check log for details", fill="white", font=('Arial', 12))
+            self.preview_canvas.create_text(240, 90, text="Preview Error", fill="red", font=('Arial', 14))
+            self.preview_canvas.create_text(240, 110, text="Check log for details", fill="white", font=('Arial', 10))
         except:
             pass
 
