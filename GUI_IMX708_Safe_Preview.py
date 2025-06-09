@@ -46,7 +46,7 @@ class UltraSafeIMX708Viewer:
         # Cropping parameters
         self.crop_params = {
             'cam0': {'width': 2070, 'start_x': 1260, 'height': 2592},
-            'cam1': {'width': 2050, 'start_x': 1400, 'height': 2592}
+            'cam1': {'width': 2020, 'start_x': 1400, 'height': 2592}
         }
 
         # Distortion correction parameters
@@ -75,9 +75,9 @@ class UltraSafeIMX708Viewer:
         self.right_rotation_angle = -0.5
         
         # Distortion correction padding
-        self.left_top_padding = 198
+        self.left_top_padding = 158
         self.left_bottom_padding = 42
-        self.right_top_padding = 150
+        self.right_top_padding = 200
         self.right_bottom_padding = 50
 
         # Default/base values
@@ -906,6 +906,16 @@ class UltraSafeIMX708Viewer:
             # Update processing settings from GUI before saving
             self.get_current_processing_settings()
             
+            # Create folder structure
+            base_folder = "RPI_Captures"
+            date_folder = datetime.now().strftime("%Y-%m-%d")
+            save_folder = os.path.join(base_folder, date_folder)
+            
+            # Ensure folders exist
+            if not os.path.exists(save_folder):
+                os.makedirs(save_folder, exist_ok=True)
+                self.log_message(f"📁 Created folder: {save_folder}")
+            
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             params_str = "_".join(f"{p}{v['value']:.2f}" for p, v in self.params.items())
 
@@ -937,14 +947,16 @@ class UltraSafeIMX708Viewer:
                 try:
                     if req0:
                         dng_filename0 = f"cam0_{timestamp}_original_{params_str}.dng"
-                        req0.save_dng(dng_filename0)
-                        self.log_message(f"✓ Saved: {dng_filename0}")
+                        dng_path0 = os.path.join(save_folder, dng_filename0)
+                        req0.save_dng(dng_path0)
+                        self.log_message(f"✓ Saved: {dng_path0}")
                         success_count += 1
                         
                     if req1:
                         dng_filename1 = f"cam1_{timestamp}_original_{params_str}.dng"
-                        req1.save_dng(dng_filename1)
-                        self.log_message(f"✓ Saved: {dng_filename1}")
+                        dng_path1 = os.path.join(save_folder, dng_filename1)
+                        req1.save_dng(dng_path1)
+                        self.log_message(f"✓ Saved: {dng_path1}")
                         success_count += 1
                         
                 except Exception as e:
@@ -969,8 +981,9 @@ class UltraSafeIMX708Viewer:
                         
                         if combined is not None:
                             tiff_filename = f"dual_{timestamp}_processed_{params_str}.tiff"
-                            if self.save_processed_image_tiff(combined, tiff_filename):
-                                self.log_message(f"✓ Saved: {tiff_filename}")
+                            tiff_path = os.path.join(save_folder, tiff_filename)
+                            if self.save_processed_image_tiff(combined, tiff_path):
+                                self.log_message(f"✓ Saved: {tiff_path}")
                                 success_count += 1
                             else:
                                 self.log_message("❌ TIFF save failed")
@@ -986,7 +999,7 @@ class UltraSafeIMX708Viewer:
 
             self.log_message(f"🎉 Save operation complete! {success_count} files saved.")
             if success_count > 0:
-                self.log_message("Files saved in current directory")
+                self.log_message(f"Files saved in: {save_folder}")
 
         except Exception as e:
             self.log_message(f"❌ Save operation error: {e}")
