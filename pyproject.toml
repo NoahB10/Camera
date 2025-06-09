@@ -6,8 +6,8 @@ build-backend = "hatchling.build"
 name = "dual-imx708-camera-control"
 version = "1.2.0"
 description = "Dual IMX708 Camera Control GUI with distortion and perspective correction"
-readme = "README.md"
-requires-python = ">=3.8"
+readme = "README_UV.md"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Camera Control Team"}
