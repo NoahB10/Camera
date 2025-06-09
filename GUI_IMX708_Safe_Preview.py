@@ -11,8 +11,6 @@ import imageio
 import threading
 import signal
 import sys
-from picamera2 import Picamera2
-import traceback
 from contextlib import contextmanager
 
 # Ultra-Safe GUI for dual IMX708 camera control - NO PREVIEW VERSION (v1.4)
@@ -123,6 +121,9 @@ class UltraSafeIMX708Viewer:
     @contextmanager
     def camera_timeout(self, timeout_seconds=5):
         """Context manager for camera operations with timeout"""
+        import threading
+        import time
+        
         class TimeoutException(Exception):
             pass
         
@@ -171,6 +172,7 @@ class UltraSafeIMX708Viewer:
             # Try to initialize camera 0
             try:
                 self.log_message("Attempting to initialize camera 0...")
+                from picamera2 import Picamera2
                 
                 with self.camera_timeout(15):  # 15 second timeout for initialization
                     self.cam0 = Picamera2(0)
@@ -717,14 +719,14 @@ class UltraSafeIMX708Viewer:
             self.root.after(0, lambda: self.preview_status.config(text="Preview stopped"))
 
     def _update_preview_display(self, frame0, frame1):
-        """Update preview display safely in Tkinter main thread - NO CV2"""
+        """Update preview display safely in Tkinter main thread"""
         try:
             # Clear canvas
             self.preview_canvas.delete("all")
             
-            # Process frames for preview (light processing without cv2)
-            display_width = 480
-            display_height = 180
+            # Process frames for preview (light processing)
+            display_width = 320
+            display_height = 240
             
             combined_image = None
             
@@ -732,23 +734,18 @@ class UltraSafeIMX708Viewer:
                 # Create side-by-side preview
                 if frame0 is not None and frame1 is not None:
                     # Both cameras - side by side
+                    # Light crop and resize for preview
                     try:
                         crop0 = self.crop_image(frame0, 'cam0') if self.apply_cropping else frame0
                         crop1 = self.crop_image(frame1, 'cam1') if self.apply_cropping else frame1
                         
-                        # Simple resize using PIL instead of cv2
-                        pil_img0 = Image.fromarray(crop0)
-                        pil_img1 = Image.fromarray(crop1)
-                        
-                        resize0 = pil_img0.resize((display_width//2, display_height))
-                        resize1 = pil_img1.resize((display_width//2, display_height))
-                        
-                        # Convert back to numpy arrays
-                        resize0_np = np.array(resize0)
-                        resize1_np = np.array(resize1)
+                        # Resize to half width each
+                        import cv2
+                        resize0 = cv2.resize(crop0, (display_width//2, display_height))
+                        resize1 = cv2.resize(crop1, (display_width//2, display_height))
                         
                         # Combine horizontally
-                        combined_image = np.hstack((resize0_np, resize1_np))
+                        combined_image = np.hstack((resize0, resize1))
                         
                     except Exception as e:
                         self.log_message(f"Preview processing error: {e}")
@@ -758,9 +755,8 @@ class UltraSafeIMX708Viewer:
                     # Only camera 0
                     try:
                         crop0 = self.crop_image(frame0, 'cam0') if self.apply_cropping else frame0
-                        pil_img0 = Image.fromarray(crop0)
-                        resized = pil_img0.resize((display_width, display_height))
-                        combined_image = np.array(resized)
+                        import cv2
+                        combined_image = cv2.resize(crop0, (display_width, display_height))
                     except:
                         return
                         
@@ -768,15 +764,20 @@ class UltraSafeIMX708Viewer:
                     # Only camera 1
                     try:
                         crop1 = self.crop_image(frame1, 'cam1') if self.apply_cropping else frame1
-                        pil_img1 = Image.fromarray(crop1)
-                        resized = pil_img1.resize((display_width, display_height))
-                        combined_image = np.array(resized)
+                        import cv2
+                        combined_image = cv2.resize(crop1, (display_width, display_height))
                     except:
                         return
                 
                 # Convert to PIL Image and then to PhotoImage
                 if combined_image is not None:
+                    # Convert BGR to RGB
+                    if len(combined_image.shape) == 3:
+                        import cv2
+                        combined_image = cv2.cvtColor(combined_image, cv2.COLOR_BGR2RGB)
+                    
                     # Convert to PIL Image
+                    from PIL import Image, ImageTk
                     pil_image = Image.fromarray(combined_image)
                     
                     # Convert to PhotoImage
@@ -956,12 +957,6 @@ class UltraSafeIMX708Viewer:
                     img0 = req0.make_array("main") if req0 else None
                     img1 = req1.make_array("main") if req1 else None
                     
-                    # Debug info for available images
-                    if img0 is not None:
-                        self.log_message(f"📸 Cam0 image - shape: {img0.shape}, dtype: {img0.dtype}, range: [{img0.min()}, {img0.max()}]")
-                    if img1 is not None:
-                        self.log_message(f"📸 Cam1 image - shape: {img1.shape}, dtype: {img1.dtype}, range: [{img1.min()}, {img1.max()}]")
-                    
                     if img0 is not None or img1 is not None:
                         # Process images
                         self.log_message("🔄 Applying image processing pipeline...")
@@ -973,20 +968,7 @@ class UltraSafeIMX708Viewer:
                         combined = self.create_combined_image(img0_final, img1_final)
                         
                         if combined is not None:
-                            # Create filename with processing info
-                            suffixes = []
-                            if self.apply_cropping:
-                                suffixes.append("cropped")
-                            if self.enable_distortion_correction:
-                                suffixes.append("corrected")
-                            if self.enable_perspective_correction:
-                                suffixes.append("perspective")
-                            if self.apply_left_rotation:
-                                suffixes.append("rotated")
-                            suffix_str = "_" + "_".join(suffixes) if suffixes else "_processed"
-                            
-                            tiff_filename = f"dual_{timestamp}{suffix_str}_{params_str}.tiff"
-                            
+                            tiff_filename = f"dual_{timestamp}_processed_{params_str}.tiff"
                             if self.save_processed_image_tiff(combined, tiff_filename):
                                 self.log_message(f"✓ Saved: {tiff_filename}")
                                 success_count += 1
@@ -999,27 +981,16 @@ class UltraSafeIMX708Viewer:
                         
                 except Exception as e:
                     self.log_message(f"❌ TIFF processing error: {e}")
+                    import traceback
                     self.log_message(f"Full error: {traceback.format_exc()}")
 
             self.log_message(f"🎉 Save operation complete! {success_count} files saved.")
             if success_count > 0:
                 self.log_message("Files saved in current directory")
-                self.log_message(f"Processing pipeline applied:")
-                self.log_message(f"   ✓ Cropping: {'Applied' if self.apply_cropping else 'Skipped'}")
-                self.log_message(f"   ✓ Radial Distortion: {'Applied' if self.enable_distortion_correction else 'Skipped'}")
-                if self.enable_distortion_correction:
-                    self.log_message(f"     - Left padding: {self.left_top_padding} top, {self.left_bottom_padding} bottom")
-                    self.log_message(f"     - Right padding: {self.right_top_padding} top, {self.right_bottom_padding} bottom")
-                self.log_message(f"   ✓ Perspective Correction: {'Applied' if self.enable_perspective_correction else 'Skipped'}")
-                self.log_message(f"   ✓ Left Rotation: {'Applied' if self.apply_left_rotation else 'Skipped'}")
-                if self.apply_left_rotation:
-                    self.log_message(f"     - Angle: {self.left_rotation_angle}°")
-                self.log_message(f"   ✓ Right Rotation: {'Applied' if self.apply_right_rotation else 'Skipped'}")
-                if self.apply_right_rotation:
-                    self.log_message(f"     - Angle: {self.right_rotation_angle}°")
 
         except Exception as e:
             self.log_message(f"❌ Save operation error: {e}")
+            import traceback
             self.log_message(f"Full error: {traceback.format_exc()}")
         
         finally:
@@ -1246,24 +1217,19 @@ class UltraSafeIMX708Viewer:
             return image
 
     def rotate_left_image(self, image):
-        """Rotate the left image by the specified angle - NO CV2"""
+        """Rotate the left image by the specified angle"""
         if not self.apply_left_rotation:
             return image
             
         try:
-            # Convert numpy array to PIL Image
-            if len(image.shape) == 3:
-                pil_image = Image.fromarray(image)
-            else:
-                pil_image = Image.fromarray(image, mode='L')
+            import cv2
+            height, width = image.shape[:2]
+            center = (width // 2, height // 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, self.left_rotation_angle, 1.0)
             
-            # Apply rotation (negative because PIL rotates counter-clockwise)
-            rotated_pil = pil_image.rotate(-self.left_rotation_angle, expand=False, fillcolor=0)
-            
-            # Convert back to numpy array
-            rotated = np.array(rotated_pil)
-            
-            self.log_message(f"  ✓ Applied {self.left_rotation_angle}° rotation to left image")
+            rotated = cv2.warpAffine(image, rotation_matrix, (width, height), 
+                                   flags=cv2.INTER_LINEAR, 
+                                   borderMode=cv2.BORDER_REFLECT_101)
             return rotated
             
         except Exception as e:
@@ -1271,24 +1237,19 @@ class UltraSafeIMX708Viewer:
             return image
 
     def rotate_right_image(self, image):
-        """Rotate the right image by the specified angle - NO CV2"""
+        """Rotate the right image by the specified angle"""
         if not self.apply_right_rotation:
             return image
             
         try:
-            # Convert numpy array to PIL Image
-            if len(image.shape) == 3:
-                pil_image = Image.fromarray(image)
-            else:
-                pil_image = Image.fromarray(image, mode='L')
+            import cv2
+            height, width = image.shape[:2]
+            center = (width // 2, height // 2)
+            rotation_matrix = cv2.getRotationMatrix2D(center, self.right_rotation_angle, 1.0)
             
-            # Apply rotation (negative because PIL rotates counter-clockwise)
-            rotated_pil = pil_image.rotate(-self.right_rotation_angle, expand=False, fillcolor=0)
-            
-            # Convert back to numpy array
-            rotated = np.array(rotated_pil)
-            
-            self.log_message(f"  ✓ Applied {self.right_rotation_angle}° rotation to right image")
+            rotated = cv2.warpAffine(image, rotation_matrix, (width, height), 
+                                   flags=cv2.INTER_LINEAR, 
+                                   borderMode=cv2.BORDER_REFLECT_101)
             return rotated
             
         except Exception as e:
@@ -1296,52 +1257,36 @@ class UltraSafeIMX708Viewer:
             return image
 
     def create_combined_image(self, left_image, right_image):
-        """Create a side-by-side combined image, handling missing cameras"""
+        """Create a side-by-side combined image"""
         try:
-            # Handle case where one or both images are missing
             if left_image is None and right_image is None:
-                self.log_message("❌ Both images are None")
                 return None
             elif left_image is None:
-                self.log_message("ℹ️  Left camera disconnected, using right camera only")
                 return right_image
             elif right_image is None:
-                self.log_message("ℹ️  Right camera disconnected, using left camera only")
                 return left_image
             else:
-                # Both images available - combine side by side
                 min_height = min(left_image.shape[0], right_image.shape[0])
                 left_resized = left_image[:min_height, :]
                 right_resized = right_image[:min_height, :]
                 
-                # Combine horizontally
                 combined = np.hstack((left_resized, right_resized))
-                self.log_message(f"✓ Created combined image: {combined.shape}")
                 return combined
         except Exception as e:
-            self.log_message(f"❌ Failed to create combined image: {e}")
-            self.log_message(f"Full error: {traceback.format_exc()}")
+            self.log_message(f"Failed to create combined image: {e}")
             return None
 
     def save_processed_image_tiff(self, image, output_path):
-        """Save processed image as TIFF using imageio for reliable output"""
+        """Save processed image as TIFF"""
         try:
-            # Ensure we have a valid image
             if image is None or image.size == 0:
-                self.log_message(f"❌ Invalid image data for {output_path}")
                 return False
             
-            self.log_message(f"💾 Saving TIFF: {output_path}")
-            self.log_message(f"   Image shape: {image.shape}, dtype: {image.dtype}, range: [{image.min()}, {image.max()}]")
-            
-            # Use imageio for TIFF - handles everything automatically
             imageio.imsave(output_path, image)
-            self.log_message(f"✓ Saved TIFF successfully: {output_path}")
             return True
             
         except Exception as e:
-            self.log_message(f"❌ Failed to save TIFF {output_path}: {e}")
-            self.log_message(f"Full error: {traceback.format_exc()}")
+            self.log_message(f"Failed to save TIFF {output_path}: {e}")
             return False
 
     def apply_settings(self):
@@ -1654,6 +1599,7 @@ def main():
         
         # Check GUI support
         try:
+            import tkinter as tk
             root = tk.Tk()
             root.withdraw()
             root.destroy()
@@ -1670,9 +1616,11 @@ def main():
         return 0
     except Exception as e:
         print(f"Error: {str(e)}")
+        import traceback
         traceback.print_exc()
         return 1
 
 
 if __name__ == "__main__":
+    import sys
     sys.exit(main())
