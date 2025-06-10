@@ -90,6 +90,21 @@ class UltraSafeIMX708Viewer:
             'Sharpness': 1.0
         }
 
+        # Processing defaults for reset functionality
+        self.processing_defaults = {
+            'apply_cropping': True,
+            'enable_distortion_correction': True,
+            'enable_perspective_correction': True,
+            'apply_left_rotation': True,
+            'apply_right_rotation': False,
+            'left_rotation_angle': -1.3,
+            'right_rotation_angle': -0.5,
+            'left_top_padding': 170,
+            'left_bottom_padding': 35,
+            'right_top_padding': 200,
+            'right_bottom_padding': 50
+        }
+
         # Parameter ranges
         self.params = {
             'ExposureTime': {'value': self.defaults['ExposureTime'], 'min': 100, 'max': 100000},
@@ -295,7 +310,7 @@ class UltraSafeIMX708Viewer:
         self.root = tk.Tk()
         self.root.title("Safe Dual IMX708 Camera Control with Preview")
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
-        self.root.geometry("1400x800")
+        self.root.geometry("1400x900")  # Increased height from 800 to 900
 
         # Main frame
         main_frame = ttk.Frame(self.root)
@@ -317,7 +332,7 @@ class UltraSafeIMX708Viewer:
         control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         control_frame.config(width=280)
 
-        # Middle processing frame (processing controls tabs)
+        # Middle processing frame (actions and processing controls tabs)
         processing_main_frame = ttk.Frame(content_frame)
         processing_main_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 5))
         processing_main_frame.config(width=350)
@@ -326,7 +341,91 @@ class UltraSafeIMX708Viewer:
         right_frame = ttk.Frame(content_frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # === MIDDLE PROCESSING FRAME - Processing Controls ===
+        # === CAMERA PARAMETERS SECTION ===
+        self.entries = {}
+        self.scales = {}
+
+        # Camera parameter controls
+        params_frame = ttk.LabelFrame(control_frame, text="Camera Parameters")
+        params_frame.pack(fill=tk.X, pady=(0, 10))
+
+        for param_name, param_data in self.params.items():
+            frame = ttk.LabelFrame(params_frame, text=param_name)
+            frame.pack(fill=tk.X, padx=5, pady=2)
+
+            scale = ttk.Scale(
+                frame,
+                from_=param_data['min'],
+                to=param_data['max'],
+                value=param_data['value'],
+                orient=tk.HORIZONTAL
+            )
+            scale.pack(fill=tk.X, padx=5)
+            scale.bind("<ButtonRelease-1>", lambda e, p=param_name: self.on_scale_change(p))
+            self.scales[param_name] = scale
+
+            entry_frame = ttk.Frame(frame)
+            entry_frame.pack(fill=tk.X, padx=5)
+
+            entry = ttk.Entry(entry_frame, width=8)
+            entry.insert(0, str(param_data['value']))
+            entry.pack(side=tk.LEFT, padx=2)
+            entry.bind('<Return>', lambda e, p=param_name: self.on_entry_change(p))
+            self.entries[param_name] = entry
+
+            ttk.Button(entry_frame, text="Set", command=lambda p=param_name: self.on_entry_change(p)).pack(side=tk.LEFT, padx=2)
+            ttk.Button(entry_frame, text="Reset", command=lambda p=param_name: self.reset_parameter(p)).pack(side=tk.LEFT, padx=2)
+
+        # Processing options - Save Options
+        save_frame = ttk.LabelFrame(control_frame, text="Save Options")
+        save_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.save_tiff_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(save_frame, text="Save Combined TIFF", 
+                       variable=self.save_tiff_var).pack(anchor=tk.W, padx=5, pady=2)
+
+        self.save_dng_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
+                       variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
+
+        # === MIDDLE PROCESSING FRAME - Actions First, Then Processing Controls ===
+        
+        # Action buttons (moved above processing controls)
+        action_frame = ttk.LabelFrame(processing_main_frame, text="Actions")
+        action_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        ttk.Button(action_frame, text="💾 Save Images", command=self.safe_save_image).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="🧪 Test Single Capture", command=self.test_capture).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Preview controls
+        preview_controls_frame = ttk.LabelFrame(action_frame, text="Preview Controls")
+        preview_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        self.preview_button = ttk.Button(preview_controls_frame, text="▶️ Start Preview", command=self.toggle_preview)
+        self.preview_button.pack(fill=tk.X, padx=5, pady=2)
+        
+        ttk.Button(preview_controls_frame, text="📷 Single Frame", command=self.capture_single_frame).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Frame rate control
+        rate_frame = ttk.Frame(preview_controls_frame)
+        rate_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(rate_frame, text="FPS:").pack(side=tk.LEFT)
+        
+        self.fps_var = tk.StringVar(value="2")
+        fps_combo = ttk.Combobox(rate_frame, textvariable=self.fps_var, width=8, values=["0.5", "1", "2", "3", "5"])
+        fps_combo.pack(side=tk.RIGHT)
+        fps_combo.bind("<<ComboboxSelected>>", self.on_fps_change)
+        
+        ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
+        
+        # Emergency stop button
+        ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
+
+        # Processing Controls (moved below actions)
         processing_frame = ttk.LabelFrame(processing_main_frame, text="Processing Controls")
         processing_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
         
@@ -467,102 +566,26 @@ class UltraSafeIMX708Viewer:
         self.right_height_var = tk.IntVar(value=self.crop_params['cam1']['height'])
         ttk.Entry(right_crop_row1, textvariable=self.right_height_var, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
-        self.entries = {}
-        self.scales = {}
-
-        # Camera parameter controls
-        params_frame = ttk.LabelFrame(control_frame, text="Camera Parameters")
-        params_frame.pack(fill=tk.X, pady=(0, 10))
-
-        for param_name, param_data in self.params.items():
-            frame = ttk.LabelFrame(params_frame, text=param_name)
-            frame.pack(fill=tk.X, padx=5, pady=2)
-
-            scale = ttk.Scale(
-                frame,
-                from_=param_data['min'],
-                to=param_data['max'],
-                value=param_data['value'],
-                orient=tk.HORIZONTAL
-            )
-            scale.pack(fill=tk.X, padx=5)
-            scale.bind("<ButtonRelease-1>", lambda e, p=param_name: self.on_scale_change(p))
-            self.scales[param_name] = scale
-
-            entry_frame = ttk.Frame(frame)
-            entry_frame.pack(fill=tk.X, padx=5)
-
-            entry = ttk.Entry(entry_frame, width=8)
-            entry.insert(0, str(param_data['value']))
-            entry.pack(side=tk.LEFT, padx=2)
-            entry.bind('<Return>', lambda e, p=param_name: self.on_entry_change(p))
-            self.entries[param_name] = entry
-
-            ttk.Button(entry_frame, text="Set", command=lambda p=param_name: self.on_entry_change(p)).pack(side=tk.LEFT, padx=2)
-            ttk.Button(entry_frame, text="Reset", command=lambda p=param_name: self.reset_parameter(p)).pack(side=tk.LEFT, padx=2)
-
-        # Action buttons
-        action_frame = ttk.LabelFrame(control_frame, text="Actions")
-        action_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        ttk.Button(action_frame, text="💾 Save Images", command=self.safe_save_image).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="🧪 Test Single Capture", command=self.test_capture).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Preview controls
-        preview_controls_frame = ttk.LabelFrame(action_frame, text="Preview Controls")
-        preview_controls_frame.pack(fill=tk.X, padx=5, pady=5)
-        
-        self.preview_button = ttk.Button(preview_controls_frame, text="▶️ Start Preview", command=self.toggle_preview)
-        self.preview_button.pack(fill=tk.X, padx=5, pady=2)
-        
-        ttk.Button(preview_controls_frame, text="📷 Single Frame", command=self.capture_single_frame).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Frame rate control
-        rate_frame = ttk.Frame(preview_controls_frame)
-        rate_frame.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(rate_frame, text="FPS:").pack(side=tk.LEFT)
-        
-        self.fps_var = tk.StringVar(value="2")
-        fps_combo = ttk.Combobox(rate_frame, textvariable=self.fps_var, width=8, values=["0.5", "1", "2", "3", "5"])
-        fps_combo.pack(side=tk.RIGHT)
-        fps_combo.bind("<<ComboboxSelected>>", self.on_fps_change)
-        
-        ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
-        ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
-        
-        # Emergency stop button
-        ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
-
-        # Processing options - Save Options
-        save_frame = ttk.LabelFrame(control_frame, text="Save Options")
-        save_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.save_tiff_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(save_frame, text="Save Combined TIFF", 
-                       variable=self.save_tiff_var).pack(anchor=tk.W, padx=5, pady=2)
-
-        self.save_dng_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
-                       variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
-
-
-
-        # Preview display (top right)
+        # Preview display (top right) - Made 2x larger with proper aspect ratio
         preview_frame = ttk.LabelFrame(right_frame, text="Camera Preview")
         preview_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Preview canvas (smaller for three-column layout)
-        self.preview_canvas = tk.Canvas(preview_frame, width=480, height=180, bg='black')
+        # Calculate proper preview dimensions based on cropped image aspect ratio
+        # Combined cropped width: cam0_width + cam1_width = 2070 + 2020 = 4090
+        # Cropped height: 2592 (same for both cameras)
+        # Aspect ratio: 4090:2592 ≈ 1.58:1
+        
+        preview_width = 800   # Increased width to better show cropped content
+        preview_height = int(preview_width * 2592 / 4090)  # Maintain proper aspect ratio ≈ 507
+        
+        self.preview_canvas = tk.Canvas(preview_frame, width=preview_width, height=preview_height, bg='black')
         self.preview_canvas.pack(padx=5, pady=5)
         
         # Preview status
         self.preview_status = ttk.Label(preview_frame, text="Preview stopped", font=('TkDefaultFont', 9))
         self.preview_status.pack(pady=2)
         
-        # Log display (bottom right)
+        # Log display (bottom right) - Reduced height by half
         log_frame = ttk.LabelFrame(right_frame, text="Activity Log")
         log_frame.pack(fill=tk.BOTH, expand=True)
         
@@ -570,8 +593,9 @@ class UltraSafeIMX708Viewer:
         log_inner_frame = ttk.Frame(log_frame)
         log_inner_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
+        # Reduced height from 15 to 8 (approximately half)
         self.log_text = tk.Text(log_inner_frame, wrap=tk.WORD, state=tk.DISABLED, 
-                               font=('Consolas', 9), bg='black', fg='lime', height=15)
+                               font=('Consolas', 9), bg='black', fg='lime', height=8)
         scrollbar = ttk.Scrollbar(log_inner_frame, orient=tk.VERTICAL, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         
@@ -649,7 +673,7 @@ class UltraSafeIMX708Viewer:
         # Clear preview canvas
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(240, 90, text="Preview Stopped", fill="white", font=('Arial', 14))
+            self.preview_canvas.create_text(480, 180, text="Preview Stopped", fill="white", font=('Arial', 14))
         except:
             pass
 
@@ -724,28 +748,51 @@ class UltraSafeIMX708Viewer:
             # Clear canvas
             self.preview_canvas.delete("all")
             
-            # Process frames for preview (light processing)
-            display_width = 320
-            display_height = 240
+            # Get current canvas dimensions
+            canvas_width = self.preview_canvas.winfo_width()
+            canvas_height = self.preview_canvas.winfo_height()
+            
+            # Use canvas dimensions if available, otherwise fall back to configured size
+            if canvas_width <= 1 or canvas_height <= 1:
+                canvas_width = 800
+                canvas_height = int(800 * 2592 / 4090)
             
             combined_image = None
             
             if frame0 is not None or frame1 is not None:
-                # Create side-by-side preview
+                # Create side-by-side preview matching output TIFF dimensions
                 if frame0 is not None and frame1 is not None:
-                    # Both cameras - side by side
-                    # Light crop and resize for preview
+                    # Both cameras - process and combine like the output TIFF
                     try:
+                        # Apply cropping to match output dimensions
                         crop0 = self.crop_image(frame0, 'cam0') if self.apply_cropping else frame0
                         crop1 = self.crop_image(frame1, 'cam1') if self.apply_cropping else frame1
                         
-                        # Resize to half width each
-                        import cv2
-                        resize0 = cv2.resize(crop0, (display_width//2, display_height))
-                        resize1 = cv2.resize(crop1, (display_width//2, display_height))
+                        # Get cropped dimensions
+                        h0, w0 = crop0.shape[:2]
+                        h1, w1 = crop1.shape[:2]
                         
-                        # Combine horizontally
-                        combined_image = np.hstack((resize0, resize1))
+                        # Match heights for side-by-side combination
+                        min_height = min(h0, h1)
+                        crop0_resized = crop0[:min_height, :]
+                        crop1_resized = crop1[:min_height, :]
+                        
+                        # Combine horizontally (like the output TIFF)
+                        combined_raw = np.hstack((crop0_resized, crop1_resized))
+                        
+                        # Scale to fit canvas while maintaining aspect ratio
+                        orig_height, orig_width = combined_raw.shape[:2]
+                        
+                        # Calculate scaling factor to fit within canvas
+                        scale_x = canvas_width / orig_width
+                        scale_y = canvas_height / orig_height
+                        scale = min(scale_x, scale_y)
+                        
+                        new_width = int(orig_width * scale)
+                        new_height = int(orig_height * scale)
+                        
+                        import cv2
+                        combined_image = cv2.resize(combined_raw, (new_width, new_height), interpolation=cv2.INTER_AREA)
                         
                     except Exception as e:
                         self.log_message(f"Preview processing error: {e}")
@@ -755,8 +802,18 @@ class UltraSafeIMX708Viewer:
                     # Only camera 0
                     try:
                         crop0 = self.crop_image(frame0, 'cam0') if self.apply_cropping else frame0
+                        orig_height, orig_width = crop0.shape[:2]
+                        
+                        # Scale to fit canvas
+                        scale_x = canvas_width / orig_width
+                        scale_y = canvas_height / orig_height
+                        scale = min(scale_x, scale_y)
+                        
+                        new_width = int(orig_width * scale)
+                        new_height = int(orig_height * scale)
+                        
                         import cv2
-                        combined_image = cv2.resize(crop0, (display_width, display_height))
+                        combined_image = cv2.resize(crop0, (new_width, new_height), interpolation=cv2.INTER_AREA)
                     except:
                         return
                         
@@ -764,12 +821,22 @@ class UltraSafeIMX708Viewer:
                     # Only camera 1
                     try:
                         crop1 = self.crop_image(frame1, 'cam1') if self.apply_cropping else frame1
+                        orig_height, orig_width = crop1.shape[:2]
+                        
+                        # Scale to fit canvas
+                        scale_x = canvas_width / orig_width
+                        scale_y = canvas_height / orig_width
+                        scale = min(scale_x, scale_y)
+                        
+                        new_width = int(orig_width * scale)
+                        new_height = int(orig_height * scale)
+                        
                         import cv2
-                        combined_image = cv2.resize(crop1, (display_width, display_height))
+                        combined_image = cv2.resize(crop1, (new_width, new_height), interpolation=cv2.INTER_AREA)
                     except:
                         return
                 
-                # Convert to PIL Image and then to PhotoImage
+                # Convert to PIL Image and display
                 if combined_image is not None:
                     # Convert BGR to RGB
                     if len(combined_image.shape) == 3:
@@ -783,14 +850,21 @@ class UltraSafeIMX708Viewer:
                     # Convert to PhotoImage
                     self.preview_photo = ImageTk.PhotoImage(pil_image)
                     
-                    # Display on canvas
-                    self.preview_canvas.create_image(240, 90, image=self.preview_photo)
+                    # Center the image on canvas
+                    canvas_center_x = canvas_width // 2
+                    canvas_center_y = canvas_height // 2
+                    self.preview_canvas.create_image(canvas_center_x, canvas_center_y, image=self.preview_photo)
                     
-                    # Add overlay text
+                    # Add overlay text at top
                     cam0_status = "✓" if self.cam0_connected else "✗"
                     cam1_status = "✓" if self.cam1_connected else "✗"
                     overlay_text = f"Cam0: {cam0_status}  Cam1: {cam1_status}"
-                    self.preview_canvas.create_text(240, 15, text=overlay_text, fill="yellow", font=('Arial', 10, 'bold'))
+                    self.preview_canvas.create_text(canvas_center_x, 15, text=overlay_text, fill="yellow", font=('Arial', 12, 'bold'))
+                    
+                    # Add dimension info at bottom
+                    img_height, img_width = combined_image.shape[:2]
+                    dim_text = f"Preview: {img_width}×{img_height} (Scaled from cropped)"
+                    self.preview_canvas.create_text(canvas_center_x, canvas_height - 15, text=dim_text, fill="cyan", font=('Arial', 10))
                     
         except Exception as e:
             self.log_message(f"❌ Preview display error: {e}")
@@ -800,8 +874,13 @@ class UltraSafeIMX708Viewer:
         """Show disconnected status in preview"""
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(240, 90, text="No Camera Data", fill="red", font=('Arial', 14))
-            self.preview_canvas.create_text(240, 110, text="Check camera connections", fill="white", font=('Arial', 10))
+            canvas_width = self.preview_canvas.winfo_width() or 800
+            canvas_height = self.preview_canvas.winfo_height() or int(800 * 2592 / 4090)
+            center_x = canvas_width // 2
+            center_y = canvas_height // 2
+            
+            self.preview_canvas.create_text(center_x, center_y, text="No Camera Data", fill="red", font=('Arial', 16))
+            self.preview_canvas.create_text(center_x, center_y + 20, text="Check camera connections", fill="white", font=('Arial', 12))
         except:
             pass
 
@@ -809,8 +888,13 @@ class UltraSafeIMX708Viewer:
         """Show error status in preview"""
         try:
             self.preview_canvas.delete("all")
-            self.preview_canvas.create_text(240, 90, text="Preview Error", fill="red", font=('Arial', 14))
-            self.preview_canvas.create_text(240, 110, text="Check log for details", fill="white", font=('Arial', 10))
+            canvas_width = self.preview_canvas.winfo_width() or 800
+            canvas_height = self.preview_canvas.winfo_height() or int(800 * 2592 / 4090)
+            center_x = canvas_width // 2
+            center_y = canvas_height // 2
+            
+            self.preview_canvas.create_text(center_x, center_y, text="Preview Error", fill="red", font=('Arial', 16))
+            self.preview_canvas.create_text(center_x, center_y + 20, text="Check log for details", fill="white", font=('Arial', 12))
         except:
             pass
 
@@ -1360,19 +1444,56 @@ class UltraSafeIMX708Viewer:
             self.reset_parameter(param_name)
 
     def save_settings(self):
-        settings = {param: self.params[param]['value'] for param in self.params}
+        """Save both camera parameters and processing settings"""
+        # Camera parameters
+        camera_settings = {param: self.params[param]['value'] for param in self.params}
+        
+        # Get current processing settings from GUI
+        self.get_current_processing_settings()
+        
+        # Processing settings
+        processing_settings = {
+            'apply_cropping': self.apply_cropping,
+            'enable_distortion_correction': self.enable_distortion_correction,
+            'enable_perspective_correction': self.enable_perspective_correction,
+            'apply_left_rotation': self.apply_left_rotation,
+            'apply_right_rotation': self.apply_right_rotation,
+            'left_rotation_angle': self.left_rotation_angle,
+            'right_rotation_angle': self.right_rotation_angle,
+            'left_top_padding': self.left_top_padding,
+            'left_bottom_padding': self.left_bottom_padding,
+            'right_top_padding': self.right_top_padding,
+            'right_bottom_padding': self.right_bottom_padding,
+            'crop_params': self.crop_params
+        }
+        
+        # Combined settings
+        all_settings = {
+            'camera_parameters': camera_settings,
+            'processing_settings': processing_settings
+        }
+        
         try:
             with open('camera_settings.json', 'w') as f:
-                json.dump(settings, f, indent=4)
-            self.log_message("Settings saved successfully")
+                json.dump(all_settings, f, indent=4)
+            self.log_message("Camera parameters and processing settings saved successfully")
         except Exception as e:
             self.log_message(f"Failed to save settings: {e}")
 
     def load_settings(self):
+        """Load both camera parameters and processing settings"""
         try:
             if os.path.exists('camera_settings.json'):
                 with open('camera_settings.json', 'r') as f:
-                    settings = json.load(f)
+                    all_settings = json.load(f)
+                
+                # Load camera parameters (backward compatibility)
+                if 'camera_parameters' in all_settings:
+                    settings = all_settings['camera_parameters']
+                else:
+                    # Old format - direct parameters
+                    settings = all_settings
+                
                 for param, value in settings.items():
                     if param in self.params:
                         self.params[param]['value'] = value
@@ -1381,7 +1502,61 @@ class UltraSafeIMX708Viewer:
                         if hasattr(self, 'entries') and param in self.entries:
                             self.entries[param].delete(0, tk.END)
                             self.entries[param].insert(0, f"{value:.2f}")
-                self.log_message("Loaded previous settings")
+                
+                # Load processing settings
+                if 'processing_settings' in all_settings:
+                    proc_settings = all_settings['processing_settings']
+                    
+                    self.apply_cropping = proc_settings.get('apply_cropping', self.processing_defaults['apply_cropping'])
+                    self.enable_distortion_correction = proc_settings.get('enable_distortion_correction', self.processing_defaults['enable_distortion_correction'])
+                    self.enable_perspective_correction = proc_settings.get('enable_perspective_correction', self.processing_defaults['enable_perspective_correction'])
+                    self.apply_left_rotation = proc_settings.get('apply_left_rotation', self.processing_defaults['apply_left_rotation'])
+                    self.apply_right_rotation = proc_settings.get('apply_right_rotation', self.processing_defaults['apply_right_rotation'])
+                    self.left_rotation_angle = proc_settings.get('left_rotation_angle', self.processing_defaults['left_rotation_angle'])
+                    self.right_rotation_angle = proc_settings.get('right_rotation_angle', self.processing_defaults['right_rotation_angle'])
+                    self.left_top_padding = proc_settings.get('left_top_padding', self.processing_defaults['left_top_padding'])
+                    self.left_bottom_padding = proc_settings.get('left_bottom_padding', self.processing_defaults['left_bottom_padding'])
+                    self.right_top_padding = proc_settings.get('right_top_padding', self.processing_defaults['right_top_padding'])
+                    self.right_bottom_padding = proc_settings.get('right_bottom_padding', self.processing_defaults['right_bottom_padding'])
+                    
+                    # Load crop parameters
+                    if 'crop_params' in proc_settings:
+                        self.crop_params = proc_settings['crop_params']
+                    
+                    # Update GUI elements if they exist
+                    if hasattr(self, 'cropping_var'):
+                        self.cropping_var.set(self.apply_cropping)
+                    if hasattr(self, 'distortion_var'):
+                        self.distortion_var.set(self.enable_distortion_correction)
+                    if hasattr(self, 'perspective_var'):
+                        self.perspective_var.set(self.enable_perspective_correction)
+                    if hasattr(self, 'left_rotation_var'):
+                        self.left_rotation_var.set(self.apply_left_rotation)
+                    if hasattr(self, 'right_rotation_var'):
+                        self.right_rotation_var.set(self.apply_right_rotation)
+                    if hasattr(self, 'left_angle_var'):
+                        self.left_angle_var.set(self.left_rotation_angle)
+                    if hasattr(self, 'right_angle_var'):
+                        self.right_angle_var.set(self.right_rotation_angle)
+                    if hasattr(self, 'left_top_padding_var'):
+                        self.left_top_padding_var.set(self.left_top_padding)
+                    if hasattr(self, 'left_bottom_padding_var'):
+                        self.left_bottom_padding_var.set(self.left_bottom_padding)
+                    if hasattr(self, 'right_top_padding_var'):
+                        self.right_top_padding_var.set(self.right_top_padding)
+                    if hasattr(self, 'right_bottom_padding_var'):
+                        self.right_bottom_padding_var.set(self.right_bottom_padding)
+                    
+                    # Update crop parameter GUI elements
+                    if hasattr(self, 'left_width_var'):
+                        self.left_width_var.set(self.crop_params['cam0']['width'])
+                        self.left_start_x_var.set(self.crop_params['cam0']['start_x'])
+                        self.left_height_var.set(self.crop_params['cam0']['height'])
+                        self.right_width_var.set(self.crop_params['cam1']['width'])
+                        self.right_start_x_var.set(self.crop_params['cam1']['start_x'])
+                        self.right_height_var.set(self.crop_params['cam1']['height'])
+                
+                self.log_message("Loaded previous camera parameters and processing settings")
         except Exception as e:
             self.log_message(f"Failed to load settings: {e}")
 
