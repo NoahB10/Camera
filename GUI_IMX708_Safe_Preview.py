@@ -566,7 +566,6 @@ class UltraSafeIMX708Viewer:
         self.right_height_var = tk.IntVar(value=self.crop_params['cam1']['height'])
         ttk.Entry(right_crop_row1, textvariable=self.right_height_var, width=8).pack(side=tk.LEFT, padx=(5, 0))
 
-<<<<<<< HEAD
         # Preview display (top right) - Made 2x larger with proper aspect ratio
         preview_frame = ttk.LabelFrame(right_frame, text="Camera Preview")
         preview_frame.pack(fill=tk.X, pady=(0, 10))
@@ -580,14 +579,6 @@ class UltraSafeIMX708Viewer:
         preview_height = int(preview_width * 2592 / 4090)  # Maintain proper aspect ratio ≈ 507
         
         self.preview_canvas = tk.Canvas(preview_frame, width=preview_width, height=preview_height, bg='black')
-=======
-        # Preview display (top right) - Made 2x larger
-        preview_frame = ttk.LabelFrame(right_frame, text="Camera Preview")
-        preview_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Preview canvas (2x larger: 960x360 instead of 480x180)
-        self.preview_canvas = tk.Canvas(preview_frame, width=960, height=360, bg='black')
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
         self.preview_canvas.pack(padx=5, pady=5)
         
         # Preview status
@@ -757,7 +748,6 @@ class UltraSafeIMX708Viewer:
             # Clear canvas
             self.preview_canvas.delete("all")
             
-<<<<<<< HEAD
             # Get current canvas dimensions
             canvas_width = self.preview_canvas.winfo_width()
             canvas_height = self.preview_canvas.winfo_height()
@@ -766,11 +756,6 @@ class UltraSafeIMX708Viewer:
             if canvas_width <= 1 or canvas_height <= 1:
                 canvas_width = 800
                 canvas_height = int(800 * 2592 / 4090)
-=======
-            # Process frames for preview (light processing) - Updated for 2x larger preview
-            display_width = 640  # Increased from 320
-            display_height = 480  # Increased from 240
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
             
             combined_image = None
             
@@ -865,30 +850,21 @@ class UltraSafeIMX708Viewer:
                     # Convert to PhotoImage
                     self.preview_photo = ImageTk.PhotoImage(pil_image)
                     
-<<<<<<< HEAD
                     # Center the image on canvas
                     canvas_center_x = canvas_width // 2
                     canvas_center_y = canvas_height // 2
                     self.preview_canvas.create_image(canvas_center_x, canvas_center_y, image=self.preview_photo)
-=======
-                    # Display on canvas (updated center position for larger canvas)
-                    self.preview_canvas.create_image(480, 180, image=self.preview_photo)
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
                     
                     # Add overlay text at top
                     cam0_status = "✓" if self.cam0_connected else "✗"
                     cam1_status = "✓" if self.cam1_connected else "✗"
                     overlay_text = f"Cam0: {cam0_status}  Cam1: {cam1_status}"
-<<<<<<< HEAD
                     self.preview_canvas.create_text(canvas_center_x, 15, text=overlay_text, fill="yellow", font=('Arial', 12, 'bold'))
                     
                     # Add dimension info at bottom
                     img_height, img_width = combined_image.shape[:2]
                     dim_text = f"Preview: {img_width}×{img_height} (Scaled from cropped)"
                     self.preview_canvas.create_text(canvas_center_x, canvas_height - 15, text=dim_text, fill="cyan", font=('Arial', 10))
-=======
-                    self.preview_canvas.create_text(480, 15, text=overlay_text, fill="yellow", font=('Arial', 12, 'bold'))
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
                     
         except Exception as e:
             self.log_message(f"❌ Preview display error: {e}")
@@ -898,7 +874,6 @@ class UltraSafeIMX708Viewer:
         """Show disconnected status in preview"""
         try:
             self.preview_canvas.delete("all")
-<<<<<<< HEAD
             canvas_width = self.preview_canvas.winfo_width() or 800
             canvas_height = self.preview_canvas.winfo_height() or int(800 * 2592 / 4090)
             center_x = canvas_width // 2
@@ -906,10 +881,6 @@ class UltraSafeIMX708Viewer:
             
             self.preview_canvas.create_text(center_x, center_y, text="No Camera Data", fill="red", font=('Arial', 16))
             self.preview_canvas.create_text(center_x, center_y + 20, text="Check camera connections", fill="white", font=('Arial', 12))
-=======
-            self.preview_canvas.create_text(480, 180, text="No Camera Data", fill="red", font=('Arial', 16))
-            self.preview_canvas.create_text(480, 200, text="Check camera connections", fill="white", font=('Arial', 12))
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
         except:
             pass
 
@@ -917,7 +888,6 @@ class UltraSafeIMX708Viewer:
         """Show error status in preview"""
         try:
             self.preview_canvas.delete("all")
-<<<<<<< HEAD
             canvas_width = self.preview_canvas.winfo_width() or 800
             canvas_height = self.preview_canvas.winfo_height() or int(800 * 2592 / 4090)
             center_x = canvas_width // 2
@@ -925,10 +895,6 @@ class UltraSafeIMX708Viewer:
             
             self.preview_canvas.create_text(center_x, center_y, text="Preview Error", fill="red", font=('Arial', 16))
             self.preview_canvas.create_text(center_x, center_y + 20, text="Check log for details", fill="white", font=('Arial', 12))
-=======
-            self.preview_canvas.create_text(480, 180, text="Preview Error", fill="red", font=('Arial', 16))
-            self.preview_canvas.create_text(480, 200, text="Check log for details", fill="white", font=('Arial', 12))
->>>>>>> 3ce32e7292c4137fc36611774305c6d1f5710292
         except:
             pass
 
