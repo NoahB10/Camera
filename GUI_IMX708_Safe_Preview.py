@@ -75,8 +75,8 @@ class UltraSafeIMX708Viewer:
         self.right_rotation_angle = -0.5
         
         # Distortion correction padding
-        self.left_top_padding = 158
-        self.left_bottom_padding = 42
+        self.left_top_padding = 170
+        self.left_bottom_padding = 35
         self.right_top_padding = 200
         self.right_bottom_padding = 50
 
