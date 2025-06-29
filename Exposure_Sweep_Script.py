@@ -9,8 +9,8 @@ import cv2
 
 # === USER CONFIGURATION ===
 exposure_start = 500     # in microseconds
-exposure_end = 10000      # in microseconds
-exposure_step = 100
+exposure_end = 9000      # in microseconds
+exposure_step = 200
 save_tiff = True
 output_base_folder = "RPI_ExposureSweep_NoGUI"
 
