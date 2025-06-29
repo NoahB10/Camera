@@ -125,6 +125,9 @@ class UltraSafeIMX708Viewer:
         # Load settings (non-blocking)
         self.load_settings()
         self.load_distortion_coefficients()
+        
+        # Save current configuration to today's folder
+        self.save_all_to_day_folder()
 
     def signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -418,6 +421,7 @@ class UltraSafeIMX708Viewer:
         
         ttk.Button(action_frame, text="🔄 Reset All Parameters", command=self.reset_all).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="💾 Save Settings", command=self.save_settings).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="📁 Save Config to Day Folder", command=self.save_all_to_day_folder).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
@@ -611,6 +615,7 @@ class UltraSafeIMX708Viewer:
         self.log_message("  ✓ Emergency stop functionality")
         self.log_message("  ✓ Graceful error handling")
         self.log_message("  ✓ Adjustable frame rate control")
+        self.log_message("  ✓ Auto-save config to daily folder")
         self.log_message("")
         self.log_message("Camera initialization starting...")
 
@@ -1477,8 +1482,109 @@ class UltraSafeIMX708Viewer:
             with open('camera_settings.json', 'w') as f:
                 json.dump(all_settings, f, indent=4)
             self.log_message("Camera parameters and processing settings saved successfully")
+            
+            # Also save to current day folder
+            self.save_all_to_day_folder()
+            
         except Exception as e:
             self.log_message(f"Failed to save settings: {e}")
+
+    def get_current_day_folder(self):
+        """Get the current day folder path, creating it if needed"""
+        base_folder = "RPI_Captures"
+        date_folder = datetime.now().strftime("%Y-%m-%d")
+        day_folder = os.path.join(base_folder, date_folder)
+        
+        # Ensure folder exists
+        if not os.path.exists(day_folder):
+            os.makedirs(day_folder, exist_ok=True)
+            self.log_message(f"📁 Created day folder: {day_folder}")
+        
+        return day_folder
+
+    def save_settings_to_day_folder(self):
+        """Save camera and processing settings to the current day folder"""
+        try:
+            day_folder = self.get_current_day_folder()
+            
+            # Camera parameters
+            camera_settings = {param: self.params[param]['value'] for param in self.params}
+            
+            # Get current processing settings from GUI
+            self.get_current_processing_settings()
+            
+            # Processing settings
+            processing_settings = {
+                'apply_cropping': self.apply_cropping,
+                'enable_distortion_correction': self.enable_distortion_correction,
+                'enable_perspective_correction': self.enable_perspective_correction,
+                'apply_left_rotation': self.apply_left_rotation,
+                'apply_right_rotation': self.apply_right_rotation,
+                'left_rotation_angle': self.left_rotation_angle,
+                'right_rotation_angle': self.right_rotation_angle,
+                'left_top_padding': self.left_top_padding,
+                'left_bottom_padding': self.left_bottom_padding,
+                'right_top_padding': self.right_top_padding,
+                'right_bottom_padding': self.right_bottom_padding,
+                'crop_params': self.crop_params
+            }
+            
+            # Combined settings with timestamp
+            all_settings = {
+                'saved_timestamp': datetime.now().isoformat(),
+                'camera_parameters': camera_settings,
+                'processing_settings': processing_settings
+            }
+            
+            settings_path = os.path.join(day_folder, 'camera_settings_daily.json')
+            with open(settings_path, 'w') as f:
+                json.dump(all_settings, f, indent=4)
+            
+            self.log_message(f"💾 Settings saved to day folder: {os.path.basename(settings_path)}")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"❌ Failed to save settings to day folder: {e}")
+            return False
+
+    def save_distortion_coefficients_to_day_folder(self):
+        """Save current distortion coefficients to the current day folder"""
+        try:
+            day_folder = self.get_current_day_folder()
+            
+            # Prepare distortion data with timestamp
+            distortion_data = {
+                'saved_timestamp': datetime.now().isoformat(),
+                'description': 'Distortion correction coefficients used for this day',
+                'cam0': self.distortion_params.get('cam0', {}),
+                'cam1': self.distortion_params.get('cam1', {})
+            }
+            
+            coeffs_path = os.path.join(day_folder, 'distortion_coefficients_daily.json')
+            with open(coeffs_path, 'w') as f:
+                json.dump(distortion_data, f, indent=4)
+            
+            self.log_message(f"💾 Distortion coefficients saved to day folder: {os.path.basename(coeffs_path)}")
+            return True
+            
+        except Exception as e:
+            self.log_message(f"❌ Failed to save distortion coefficients to day folder: {e}")
+            return False
+
+    def save_all_to_day_folder(self):
+        """Save both settings and distortion coefficients to the current day folder"""
+        self.log_message("💾 Saving configuration to current day folder...")
+        
+        settings_saved = self.save_settings_to_day_folder()
+        coeffs_saved = self.save_distortion_coefficients_to_day_folder()
+        
+        if settings_saved and coeffs_saved:
+            day_folder = self.get_current_day_folder()
+            self.log_message(f"✅ Complete configuration saved to: {day_folder}")
+        elif settings_saved or coeffs_saved:
+            self.log_message("⚠️  Partial configuration save completed (check errors above)")
+        else:
+            self.log_message("❌ Configuration save failed")
 
     def load_settings(self):
         """Load both camera parameters and processing settings"""
@@ -1614,6 +1720,9 @@ class UltraSafeIMX708Viewer:
         if success:
             self.log_message(f"✓ Loaded coefficients from {os.path.basename(coeff_file)}")
             messagebox.showinfo("Success", f"Distortion coefficients loaded successfully from:\n{os.path.basename(coeff_file)}")
+            
+            # Save updated configuration to day folder
+            self.save_all_to_day_folder()
         else:
             self.log_message(f"✗ Failed to load coefficients from {os.path.basename(coeff_file)}")
             messagebox.showerror("Error", f"Failed to load coefficients from:\n{os.path.basename(coeff_file)}\n\nCheck log for details.")
