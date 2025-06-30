@@ -43,6 +43,11 @@ class UltraSafeIMX708Viewer:
         # Initialize camera configuration template
         self.camera_config = None
 
+        # Autofocus support tracking
+        self.focus_supported = {"cam0": False, "cam1": False}
+        self.focus_sliders = {}
+        self.camera_info = {"cam0": {}, "cam1": {}}
+
         # Cropping parameters
         self.crop_params = {
             'cam0': {'width': 2070, 'start_x': 1260, 'height': 2592},
@@ -260,6 +265,17 @@ class UltraSafeIMX708Viewer:
             if self.cam0_connected or self.cam1_connected:
                 self.apply_settings()
                 
+                # Detect camera capabilities after successful initialization
+                self.log_message("🔍 Detecting camera capabilities...")
+                if self.cam0_connected:
+                    self.detect_camera_capabilities(self.cam0, "cam0")
+                if self.cam1_connected:
+                    self.detect_camera_capabilities(self.cam1, "cam1")
+                
+                # Create focus controls based on detected capabilities
+                self.log_message("🎛️  Setting up focus controls...")
+                self.create_focus_controls()
+                
         except ImportError:
             self.log_message("ERROR: Picamera2 not available - running in simulation mode")
             self.cam0_connected = False
@@ -391,44 +407,13 @@ class UltraSafeIMX708Viewer:
         ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
                     variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
         # === FOCUS CONTROL SECTION ===
-        focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
-        focus_frame.pack(fill=tk.X, pady=(0, 10))
-
-        self.focus_supported = {"cam0": False, "cam1": False}
-        self.focus_sliders = {}
-
-        for cam_label, cam_attr in [("cam0", "cam0"), ("cam1", "cam1")]:
-            cam_obj = getattr(self, cam_attr, None)
-            
-            try:
-                # Attempt to detect if focus control is supported
-                if cam_obj is None:
-                    continue
-
-                # Dummy call to check support
-                cam_obj.set_controls({"AfMode": 0})
-                cam_obj.set_controls({"LensPosition": 1.0})
-
-                self.focus_supported[cam_label] = True
-                frame = ttk.LabelFrame(focus_frame, text=f"Focus - {cam_label}")
-                frame.pack(fill=tk.X, padx=5, pady=2)
-
-                slider = ttk.Scale(
-                    frame,
-                    from_=0.0,
-                    to=10.0,
-                    orient=tk.HORIZONTAL,
-                    command=lambda val, c=cam_label: self.on_focus_change(c, float(val))
-                )
-                slider.set(1.0)
-                slider.pack(fill=tk.X, padx=5)
-                self.focus_sliders[cam_label] = slider
-
-                self.log_message(f"✓ Focus slider enabled for {cam_label}")
-
-            except Exception as e:
-                self.focus_supported[cam_label] = False
-                self.log_message(f"✗ Focus not supported for {cam_label}: {e}")
+        # Note: Focus controls will be created after camera initialization
+        self.focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
+        self.focus_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        # Placeholder label - will be replaced after camera detection
+        self.focus_status_label = ttk.Label(self.focus_frame, text="Focus detection pending camera initialization...")
+        self.focus_status_label.pack(padx=5, pady=5)
         # === MIDDLE PROCESSING FRAME - Actions First, Then Processing Controls ===
         
         # Action buttons (moved above processing controls)
@@ -463,6 +448,7 @@ class UltraSafeIMX708Viewer:
         ttk.Button(action_frame, text="📁 Load Distortion Coefficients", command=self.load_coefficients_dialog).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="📊 Show Processing Info", command=self.show_processing_info).pack(fill=tk.X, padx=5, pady=2)
         ttk.Button(action_frame, text="🔌 Reconnect Cameras", command=self.safe_reconnect_cameras).pack(fill=tk.X, padx=5, pady=2)
+        ttk.Button(action_frame, text="🔍 Refresh Focus Controls", command=self.refresh_focus_controls).pack(fill=tk.X, padx=5, pady=2)
         
         # Emergency stop button
         ttk.Button(action_frame, text="🛑 EMERGENCY STOP", command=self.emergency_stop).pack(fill=tk.X, padx=5, pady=5)
@@ -661,15 +647,43 @@ class UltraSafeIMX708Viewer:
         threading.Thread(target=self.initialize_cameras, daemon=True).start()
     
     def on_focus_change(self, cam_label, value):
-        """Adjust focus (LensPosition) for supported cameras"""
-        cam_obj = getattr(self, cam_label, None)
-        if not self.focus_supported.get(cam_label, False) or cam_obj is None:
-            return
+        """Adjust focus (LensPosition) for supported cameras with enhanced control"""
         try:
-            cam_obj.set_controls({"AfMode": 0, "LensPosition": value})
-            self.log_message(f"{cam_label} focus set to {value:.2f}")
+            cam_obj = getattr(self, cam_label, None)
+            if not self.focus_supported.get(cam_label, False) or cam_obj is None:
+                self.log_message(f"⚠️  {cam_label}: Focus control not available")
+                return
+            
+            # Validate the focus value is within expected range
+            info = self.camera_info[cam_label]
+            if info.get('lens_position_range'):
+                min_pos, max_pos = info['lens_position_range']
+                if value < min_pos or value > max_pos:
+                    self.log_message(f"⚠️  {cam_label}: Focus value {value:.2f} outside range {min_pos}-{max_pos}")
+                    return
+            
+            # Set manual mode and lens position
+            cam_obj.set_controls({
+                "AfMode": 0,          # Manual focus mode
+                "LensPosition": float(value)
+            })
+            
+            # Log the change with current position if possible
+            current_pos = self.get_current_focus_position(cam_label)
+            if current_pos is not None:
+                self.log_message(f"🎯 {cam_label}: Focus set to {value:.2f} (actual: {current_pos:.2f})")
+            else:
+                self.log_message(f"🎯 {cam_label}: Focus set to {value:.2f}")
+                
         except Exception as e:
-            self.log_message(f"Failed to set focus for {cam_label}: {e}")
+            self.log_message(f"❌ Failed to set focus for {cam_label}: {e}")
+            # Try to restore to a safe position
+            try:
+                if cam_obj:
+                    cam_obj.set_controls({"AfMode": 0, "LensPosition": 1.0})
+                    self.log_message(f"🔧 {cam_label}: Reset to safe focus position")
+            except:
+                pass
 
     def emergency_stop(self):
         """Emergency stop all operations"""
@@ -1936,6 +1950,319 @@ class UltraSafeIMX708Viewer:
             self.crop_params['cam1']['width'] = self.right_width_var.get()
             self.crop_params['cam1']['start_x'] = self.right_start_x_var.get()
             self.crop_params['cam1']['height'] = self.right_height_var.get()
+
+    def detect_camera_capabilities(self, cam, cam_label):
+        """Detect and log camera capabilities including autofocus support"""
+        try:
+            if cam is None:
+                self.log_message(f"❌ {cam_label}: Camera not available for capability detection")
+                return
+            
+            # Get available controls
+            controls = cam.camera_controls
+            self.camera_info[cam_label] = {
+                'available_controls': list(controls.keys()),
+                'autofocus_capable': False,
+                'lens_position_range': None,
+                'af_modes': None
+            }
+            
+            self.log_message(f"🔍 {cam_label} - Available controls: {len(controls)} found")
+            
+            # Check for autofocus capabilities
+            autofocus_controls = []
+            if "LensPosition" in controls:
+                autofocus_controls.append("LensPosition")
+                # Get lens position range
+                lens_control = controls["LensPosition"]
+                self.camera_info[cam_label]['lens_position_range'] = (lens_control.min, lens_control.max)
+                self.log_message(f"  ✓ LensPosition: {lens_control.min} - {lens_control.max}")
+                
+            if "AfMode" in controls:
+                autofocus_controls.append("AfMode")
+                af_control = controls["AfMode"]
+                self.camera_info[cam_label]['af_modes'] = (af_control.min, af_control.max)
+                self.log_message(f"  ✓ AfMode: {af_control.min} - {af_control.max}")
+                
+            if "AfTrigger" in controls:
+                autofocus_controls.append("AfTrigger")
+                self.log_message(f"  ✓ AfTrigger available")
+                
+            if "AfState" in controls:
+                autofocus_controls.append("AfState")
+                self.log_message(f"  ✓ AfState available")
+                
+            # Determine autofocus support
+            has_manual_focus = "LensPosition" in controls and "AfMode" in controls
+            if has_manual_focus:
+                self.focus_supported[cam_label] = True
+                self.camera_info[cam_label]['autofocus_capable'] = True
+                self.log_message(f"  🎯 {cam_label}: Manual focus control SUPPORTED")
+            else:
+                self.focus_supported[cam_label] = False
+                self.log_message(f"  ❌ {cam_label}: Manual focus control NOT SUPPORTED")
+                
+            # Log camera model info if available
+            try:
+                camera_props = cam.camera_properties
+                if 'Model' in camera_props:
+                    self.log_message(f"  📷 {cam_label}: Model = {camera_props['Model']}")
+                if 'PixelArraySize' in camera_props:
+                    self.log_message(f"  📐 {cam_label}: Sensor size = {camera_props['PixelArraySize']}")
+            except:
+                pass
+                
+        except Exception as e:
+            self.log_message(f"❌ {cam_label}: Error detecting capabilities: {e}")
+            self.focus_supported[cam_label] = False
+
+    def create_focus_controls(self):
+        """Create focus control sliders for cameras that support autofocus"""
+        try:
+            # Clear existing focus status
+            if hasattr(self, 'focus_status_label'):
+                self.focus_status_label.destroy()
+            
+            # Clear any existing sliders
+            for widget in self.focus_frame.winfo_children():
+                widget.destroy()
+                
+            supported_cameras = [cam for cam in ["cam0", "cam1"] if self.focus_supported[cam]]
+            
+            if not supported_cameras:
+                # No cameras support focus
+                no_focus_label = ttk.Label(self.focus_frame, 
+                                         text="No cameras detected with autofocus support",
+                                         foreground="red")
+                no_focus_label.pack(padx=5, pady=5)
+                self.log_message("ℹ️  No focus controls created - no autofocus support detected")
+                return
+            
+            # Create controls for supported cameras
+            for cam_label in supported_cameras:
+                self.log_message(f"🎛️  Creating focus controls for {cam_label}")
+                
+                # Create frame for this camera's focus control
+                cam_frame = ttk.LabelFrame(self.focus_frame, text=f"Focus - {cam_label.upper()}")
+                cam_frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                # Get lens position range
+                info = self.camera_info[cam_label]
+                if info.get('lens_position_range'):
+                    min_pos, max_pos = info['lens_position_range']
+                else:
+                    min_pos, max_pos = 0.0, 10.0  # Default range
+                
+                # Create slider
+                slider_frame = ttk.Frame(cam_frame)
+                slider_frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                slider = ttk.Scale(
+                    slider_frame,
+                    from_=min_pos,
+                    to=max_pos,
+                    orient=tk.HORIZONTAL,
+                    command=lambda val, c=cam_label: self.on_focus_change(c, float(val))
+                )
+                slider.set(1.0)  # Default position
+                slider.pack(fill=tk.X)
+                self.focus_sliders[cam_label] = slider
+                
+                # Add position display and controls
+                control_frame = ttk.Frame(cam_frame)
+                control_frame.pack(fill=tk.X, padx=5, pady=2)
+                
+                ttk.Label(control_frame, text=f"Range: {min_pos:.1f} - {max_pos:.1f}").pack(side=tk.LEFT)
+                
+                # Add preset buttons
+                preset_frame = ttk.Frame(control_frame)
+                preset_frame.pack(side=tk.RIGHT)
+                
+                ttk.Button(preset_frame, text="Near", width=6,
+                          command=lambda c=cam_label: self.set_focus_preset(c, "near")).pack(side=tk.LEFT, padx=1)
+                ttk.Button(preset_frame, text="Mid", width=6,
+                          command=lambda c=cam_label: self.set_focus_preset(c, "mid")).pack(side=tk.LEFT, padx=1)
+                ttk.Button(preset_frame, text="Far", width=6,
+                          command=lambda c=cam_label: self.set_focus_preset(c, "far")).pack(side=tk.LEFT, padx=1)
+                
+                # Add autofocus buttons if camera supports it
+                try:
+                    cam_obj = getattr(self, cam_label, None)
+                    if cam_obj and "AfTrigger" in cam_obj.camera_controls:
+                        af_frame = ttk.Frame(cam_frame)
+                        af_frame.pack(fill=tk.X, padx=5, pady=2)
+                        
+                        ttk.Label(af_frame, text="Auto Focus:").pack(side=tk.LEFT)
+                        ttk.Button(af_frame, text="🎯 Trigger AF", width=12,
+                                  command=lambda c=cam_label: self.trigger_autofocus(c)).pack(side=tk.LEFT, padx=2)
+                        
+                        # Mode selection
+                        mode_frame = ttk.Frame(af_frame)
+                        mode_frame.pack(side=tk.RIGHT)
+                        
+                        ttk.Button(mode_frame, text="Manual", width=8,
+                                  command=lambda c=cam_label: self.set_autofocus_mode(c, 0)).pack(side=tk.LEFT, padx=1)
+                        ttk.Button(mode_frame, text="Auto", width=8,
+                                  command=lambda c=cam_label: self.set_autofocus_mode(c, 1)).pack(side=tk.LEFT, padx=1)
+                        if "AfMode" in cam_obj.camera_controls and cam_obj.camera_controls["AfMode"].max >= 2:
+                            ttk.Button(mode_frame, text="Continuous", width=10,
+                                      command=lambda c=cam_label: self.set_autofocus_mode(c, 2)).pack(side=tk.LEFT, padx=1)
+                except:
+                    pass  # Skip autofocus buttons if detection fails
+                
+                self.log_message(f"  ✅ Focus slider created for {cam_label} (range: {min_pos:.1f}-{max_pos:.1f})")
+            
+            # Add summary info
+            summary_frame = ttk.Frame(self.focus_frame)
+            summary_frame.pack(fill=tk.X, padx=5, pady=(5, 0))
+            
+            supported_count = len(supported_cameras)
+            total_count = len([cam for cam in ["cam0", "cam1"] if getattr(self, cam, None) is not None])
+            
+            summary_text = f"Focus controls: {supported_count}/{total_count} cameras supported"
+            ttk.Label(summary_frame, text=summary_text, font=('TkDefaultFont', 8)).pack()
+            
+            self.log_message(f"🎉 Focus controls setup complete: {supported_count}/{total_count} cameras")
+            
+        except Exception as e:
+            self.log_message(f"❌ Error creating focus controls: {e}")
+
+    def set_focus_preset(self, cam_label, preset):
+        """Set focus to preset positions"""
+        if cam_label not in self.focus_sliders:
+            return
+            
+        slider = self.focus_sliders[cam_label]
+        info = self.camera_info[cam_label]
+        
+        if info.get('lens_position_range'):
+            min_pos, max_pos = info['lens_position_range']
+        else:
+            min_pos, max_pos = 0.0, 10.0
+            
+        if preset == "near":
+            position = max_pos * 0.8  # Near focus
+        elif preset == "mid":
+            position = (min_pos + max_pos) / 2  # Middle focus
+        elif preset == "far":
+            position = min_pos + (max_pos - min_pos) * 0.2  # Far focus (closer to infinity)
+        else:
+            return
+            
+        slider.set(position)
+        self.on_focus_change(cam_label, position)
+        self.log_message(f"🎯 {cam_label}: Focus preset '{preset}' set to {position:.2f}")
+
+    def get_current_focus_position(self, cam_label):
+        """Get current focus position from camera metadata"""
+        try:
+            cam = getattr(self, cam_label, None)
+            if cam is None or not self.focus_supported.get(cam_label, False):
+                return None
+                
+            # Capture metadata to get current lens position
+            metadata = cam.capture_metadata()
+            if "LensPosition" in metadata:
+                return metadata["LensPosition"]
+            return None
+        except Exception as e:
+            self.log_message(f"⚠️  Could not read focus position for {cam_label}: {e}")
+            return None
+
+    def refresh_focus_controls(self):
+        """Refresh focus controls by re-detecting camera capabilities"""
+        self.log_message("🔄 Refreshing focus controls...")
+        
+        # Reset focus support tracking
+        self.focus_supported = {"cam0": False, "cam1": False}
+        self.camera_info = {"cam0": {}, "cam1": {}}
+        
+        # Re-detect capabilities for connected cameras
+        if self.cam0_connected and self.cam0:
+            self.detect_camera_capabilities(self.cam0, "cam0")
+        if self.cam1_connected and self.cam1:
+            self.detect_camera_capabilities(self.cam1, "cam1")
+        
+        # Recreate focus controls
+        self.create_focus_controls()
+        self.log_message("✅ Focus controls refresh complete")
+
+    def trigger_autofocus(self, cam_label):
+        """Trigger automatic autofocus for supported cameras"""
+        try:
+            cam_obj = getattr(self, cam_label, None)
+            if not self.focus_supported.get(cam_label, False) or cam_obj is None:
+                self.log_message(f"⚠️  {cam_label}: Autofocus not available")
+                return False
+            
+            # Check if AfTrigger is available
+            controls = cam_obj.camera_controls
+            if "AfTrigger" not in controls:
+                self.log_message(f"⚠️  {cam_label}: AfTrigger not supported")
+                return False
+            
+            # Set to auto mode and trigger autofocus
+            self.log_message(f"🎯 {cam_label}: Triggering autofocus...")
+            cam_obj.set_controls({
+                "AfMode": 1,        # Auto mode
+                "AfTrigger": 0      # Trigger autofocus cycle
+            })
+            
+            # Wait a bit and check status
+            import time
+            time.sleep(0.5)
+            
+            # Try to read AF state if available
+            try:
+                metadata = cam_obj.capture_metadata()
+                if "AfState" in metadata:
+                    af_state = metadata["AfState"]
+                    state_names = {0: "Idle", 1: "Scanning", 2: "Focused", 3: "Failed"}
+                    state_name = state_names.get(af_state, f"Unknown({af_state})")
+                    self.log_message(f"🎯 {cam_label}: Autofocus state: {state_name}")
+                
+                if "LensPosition" in metadata:
+                    lens_pos = metadata["LensPosition"]
+                    self.log_message(f"🎯 {cam_label}: Final lens position: {lens_pos:.2f}")
+                    
+                    # Update slider if it exists
+                    if cam_label in self.focus_sliders:
+                        self.focus_sliders[cam_label].set(lens_pos)
+                        
+            except Exception as e:
+                self.log_message(f"⚠️  {cam_label}: Could not read autofocus result: {e}")
+            
+            return True
+            
+        except Exception as e:
+            self.log_message(f"❌ {cam_label}: Autofocus trigger failed: {e}")
+            return False
+
+    def set_autofocus_mode(self, cam_label, mode):
+        """Set autofocus mode: 0=Manual, 1=Auto, 2=Continuous"""
+        try:
+            cam_obj = getattr(self, cam_label, None)
+            if not self.focus_supported.get(cam_label, False) or cam_obj is None:
+                self.log_message(f"⚠️  {cam_label}: Autofocus not available")
+                return False
+            
+            # Check if AfMode is available
+            controls = cam_obj.camera_controls
+            if "AfMode" not in controls:
+                self.log_message(f"⚠️  {cam_label}: AfMode not supported")
+                return False
+            
+            mode_names = {0: "Manual", 1: "Auto", 2: "Continuous"}
+            mode_name = mode_names.get(mode, f"Unknown({mode})")
+            
+            self.log_message(f"🎯 {cam_label}: Setting autofocus mode to {mode_name}")
+            cam_obj.set_controls({"AfMode": mode})
+            
+            return True
+            
+        except Exception as e:
+            self.log_message(f"❌ {cam_label}: Failed to set autofocus mode: {e}")
+            return False
 
 
 def main():
