@@ -407,15 +407,6 @@ class UltraSafeIMX708Viewer:
         ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
                     variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
         # === FOCUS CONTROL SECTION ===
-<<<<<<< HEAD
-        # Note: Focus controls will be created after camera initialization
-        self.focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
-        self.focus_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Placeholder label - will be replaced after camera detection
-        self.focus_status_label = ttk.Label(self.focus_frame, text="Focus detection pending camera initialization...")
-        self.focus_status_label.pack(padx=5, pady=5)
-=======
         focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
         focus_frame.pack(fill=tk.X, pady=(0, 10))
 
@@ -454,7 +445,6 @@ class UltraSafeIMX708Viewer:
             except Exception as e:
                 self.focus_supported[cam_label] = False
                 self.log_message(f"✗ Focus not supported for {cam_label}: {e}")
->>>>>>> 5ff3d33 (nada)
         # === MIDDLE PROCESSING FRAME - Actions First, Then Processing Controls ===
         
         # Action buttons (moved above processing controls)
@@ -688,45 +678,6 @@ class UltraSafeIMX708Viewer:
         threading.Thread(target=self.initialize_cameras, daemon=True).start()
     
     def on_focus_change(self, cam_label, value):
-<<<<<<< HEAD
-        """Adjust focus (LensPosition) for supported cameras with enhanced control"""
-        try:
-            cam_obj = getattr(self, cam_label, None)
-            if not self.focus_supported.get(cam_label, False) or cam_obj is None:
-                self.log_message(f"⚠️  {cam_label}: Focus control not available")
-                return
-            
-            # Validate the focus value is within expected range
-            info = self.camera_info[cam_label]
-            if info.get('lens_position_range'):
-                min_pos, max_pos = info['lens_position_range']
-                if value < min_pos or value > max_pos:
-                    self.log_message(f"⚠️  {cam_label}: Focus value {value:.2f} outside range {min_pos}-{max_pos}")
-                    return
-            
-            # Set manual mode and lens position
-            cam_obj.set_controls({
-                "AfMode": 0,          # Manual focus mode
-                "LensPosition": float(value)
-            })
-            
-            # Log the change with current position if possible
-            current_pos = self.get_current_focus_position(cam_label)
-            if current_pos is not None:
-                self.log_message(f"🎯 {cam_label}: Focus set to {value:.2f} (actual: {current_pos:.2f})")
-            else:
-                self.log_message(f"🎯 {cam_label}: Focus set to {value:.2f}")
-                
-        except Exception as e:
-            self.log_message(f"❌ Failed to set focus for {cam_label}: {e}")
-            # Try to restore to a safe position
-            try:
-                if cam_obj:
-                    cam_obj.set_controls({"AfMode": 0, "LensPosition": 1.0})
-                    self.log_message(f"🔧 {cam_label}: Reset to safe focus position")
-            except:
-                pass
-=======
         """Adjust focus (LensPosition) for supported cameras"""
         cam_obj = getattr(self, cam_label, None)
         if not self.focus_supported.get(cam_label, False) or cam_obj is None:
@@ -736,7 +687,6 @@ class UltraSafeIMX708Viewer:
             self.log_message(f"{cam_label} focus set to {value:.2f}")
         except Exception as e:
             self.log_message(f"Failed to set focus for {cam_label}: {e}")
->>>>>>> 5ff3d33 (nada)
 
     def emergency_stop(self):
         """Emergency stop all operations"""
