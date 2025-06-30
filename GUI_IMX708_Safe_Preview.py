@@ -407,44 +407,16 @@ class UltraSafeIMX708Viewer:
         ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
                     variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
         # === FOCUS CONTROL SECTION ===
-        focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
-        focus_frame.pack(fill=tk.X, pady=(0, 10))
+        self.focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
+        self.focus_frame.pack(fill=tk.X, pady=(0, 10))
 
+        # Initialize focus support tracking (will be populated after camera detection)
         self.focus_supported = {"cam0": False, "cam1": False}
         self.focus_sliders = {}
 
-        for cam_label, cam_attr in [("cam0", "cam0"), ("cam1", "cam1")]:
-            cam_obj = getattr(self, cam_attr, None)
-            
-            try:
-                # Attempt to detect if focus control is supported
-                if cam_obj is None:
-                    continue
-
-                # Dummy call to check support
-                cam_obj.set_controls({"AfMode": 0})
-                cam_obj.set_controls({"LensPosition": 1.0})
-
-                self.focus_supported[cam_label] = True
-                frame = ttk.LabelFrame(focus_frame, text=f"Focus - {cam_label}")
-                frame.pack(fill=tk.X, padx=5, pady=2)
-
-                slider = ttk.Scale(
-                    frame,
-                    from_=0.0,
-                    to=10.0,
-                    orient=tk.HORIZONTAL,
-                    command=lambda val, c=cam_label: self.on_focus_change(c, float(val))
-                )
-                slider.set(1.0)
-                slider.pack(fill=tk.X, padx=5)
-                self.focus_sliders[cam_label] = slider
-
-                self.log_message(f"✓ Focus slider enabled for {cam_label}")
-
-            except Exception as e:
-                self.focus_supported[cam_label] = False
-                self.log_message(f"✗ Focus not supported for {cam_label}: {e}")
+        # Add placeholder label - will be replaced after camera detection
+        self.focus_status_label = ttk.Label(self.focus_frame, text="Focus detection pending camera initialization...")
+        self.focus_status_label.pack(padx=5, pady=5)
         # === MIDDLE PROCESSING FRAME - Actions First, Then Processing Controls ===
         
         # Action buttons (moved above processing controls)
@@ -1976,16 +1948,39 @@ class UltraSafeIMX708Viewer:
             autofocus_controls = []
             if "LensPosition" in controls:
                 autofocus_controls.append("LensPosition")
-                # Get lens position range
-                lens_control = controls["LensPosition"]
-                self.camera_info[cam_label]['lens_position_range'] = (lens_control.min, lens_control.max)
-                self.log_message(f"  ✓ LensPosition: {lens_control.min} - {lens_control.max}")
+                # Get lens position range - handle different control object types
+                try:
+                    lens_control = controls["LensPosition"]
+                    if hasattr(lens_control, 'min') and hasattr(lens_control, 'max'):
+                        self.camera_info[cam_label]['lens_position_range'] = (lens_control.min, lens_control.max)
+                        self.log_message(f"  ✓ LensPosition: {lens_control.min} - {lens_control.max}")
+                    elif isinstance(lens_control, tuple) and len(lens_control) >= 2:
+                        self.camera_info[cam_label]['lens_position_range'] = (lens_control[0], lens_control[1])
+                        self.log_message(f"  ✓ LensPosition: {lens_control[0]} - {lens_control[1]}")
+                    else:
+                        # Default range if we can't determine
+                        self.camera_info[cam_label]['lens_position_range'] = (0.0, 10.0)
+                        self.log_message(f"  ✓ LensPosition: available (using default range 0.0-10.0)")
+                except Exception as e:
+                    self.camera_info[cam_label]['lens_position_range'] = (0.0, 10.0)
+                    self.log_message(f"  ✓ LensPosition: available (range detection failed: {e})")
                 
             if "AfMode" in controls:
                 autofocus_controls.append("AfMode")
-                af_control = controls["AfMode"]
-                self.camera_info[cam_label]['af_modes'] = (af_control.min, af_control.max)
-                self.log_message(f"  ✓ AfMode: {af_control.min} - {af_control.max}")
+                try:
+                    af_control = controls["AfMode"]
+                    if hasattr(af_control, 'min') and hasattr(af_control, 'max'):
+                        self.camera_info[cam_label]['af_modes'] = (af_control.min, af_control.max)
+                        self.log_message(f"  ✓ AfMode: {af_control.min} - {af_control.max}")
+                    elif isinstance(af_control, tuple) and len(af_control) >= 2:
+                        self.camera_info[cam_label]['af_modes'] = (af_control[0], af_control[1])
+                        self.log_message(f"  ✓ AfMode: {af_control[0]} - {af_control[1]}")
+                    else:
+                        self.camera_info[cam_label]['af_modes'] = (0, 2)
+                        self.log_message(f"  ✓ AfMode: available (using default modes 0-2)")
+                except Exception as e:
+                    self.camera_info[cam_label]['af_modes'] = (0, 2)
+                    self.log_message(f"  ✓ AfMode: available (mode detection failed: {e})")
                 
             if "AfTrigger" in controls:
                 autofocus_controls.append("AfTrigger")
@@ -2107,7 +2102,25 @@ class UltraSafeIMX708Viewer:
                                   command=lambda c=cam_label: self.set_autofocus_mode(c, 0)).pack(side=tk.LEFT, padx=1)
                         ttk.Button(mode_frame, text="Auto", width=8,
                                   command=lambda c=cam_label: self.set_autofocus_mode(c, 1)).pack(side=tk.LEFT, padx=1)
-                        if "AfMode" in cam_obj.camera_controls and cam_obj.camera_controls["AfMode"].max >= 2:
+                        
+                        # Check if continuous mode is available
+                        try:
+                            if "AfMode" in cam_obj.camera_controls:
+                                af_control = cam_obj.camera_controls["AfMode"]
+                                continuous_available = False
+                                
+                                if hasattr(af_control, 'max'):
+                                    continuous_available = af_control.max >= 2
+                                elif isinstance(af_control, tuple) and len(af_control) >= 2:
+                                    continuous_available = af_control[1] >= 2
+                                else:
+                                    continuous_available = True  # Assume available
+                                
+                                if continuous_available:
+                                    ttk.Button(mode_frame, text="Continuous", width=10,
+                                              command=lambda c=cam_label: self.set_autofocus_mode(c, 2)).pack(side=tk.LEFT, padx=1)
+                        except:
+                            # If detection fails, just add the button anyway
                             ttk.Button(mode_frame, text="Continuous", width=10,
                                       command=lambda c=cam_label: self.set_autofocus_mode(c, 2)).pack(side=tk.LEFT, padx=1)
                 except:
