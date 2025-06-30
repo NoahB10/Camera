@@ -1958,12 +1958,12 @@ class UltraSafeIMX708Viewer:
                         self.camera_info[cam_label]['lens_position_range'] = (lens_control[0], lens_control[1])
                         self.log_message(f"  ✓ LensPosition: {lens_control[0]} - {lens_control[1]}")
                     else:
-                        # Default range if we can't determine
-                        self.camera_info[cam_label]['lens_position_range'] = (0.0, 10.0)
-                        self.log_message(f"  ✓ LensPosition: available (using default range 0.0-10.0)")
+                        # Default range if we can't determine - IMX708 typically 0.0-7.0
+                        self.camera_info[cam_label]['lens_position_range'] = (0.0, 7.0)
+                        self.log_message(f"  ✓ LensPosition: available (using default range 0.0-7.0 for IMX708)")
                 except Exception as e:
-                    self.camera_info[cam_label]['lens_position_range'] = (0.0, 10.0)
-                    self.log_message(f"  ✓ LensPosition: available (range detection failed: {e})")
+                    self.camera_info[cam_label]['lens_position_range'] = (0.0, 7.0)
+                    self.log_message(f"  ✓ LensPosition: available (range detection failed: {e}, using default 0.0-7.0)")
                 
             if "AfMode" in controls:
                 autofocus_controls.append("AfMode")
@@ -2049,7 +2049,7 @@ class UltraSafeIMX708Viewer:
                 if info.get('lens_position_range'):
                     min_pos, max_pos = info['lens_position_range']
                 else:
-                    min_pos, max_pos = 0.0, 10.0  # Default range
+                    min_pos, max_pos = 0.0, 7.0  # Default range for IMX708
                 
                 # Create slider
                 slider_frame = ttk.Frame(cam_frame)
@@ -2154,7 +2154,7 @@ class UltraSafeIMX708Viewer:
         if info.get('lens_position_range'):
             min_pos, max_pos = info['lens_position_range']
         else:
-            min_pos, max_pos = 0.0, 10.0
+            min_pos, max_pos = 0.0, 7.0
             
         if preset == "near":
             position = max_pos * 0.8  # Near focus
