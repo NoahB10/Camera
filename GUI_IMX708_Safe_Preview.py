@@ -389,8 +389,46 @@ class UltraSafeIMX708Viewer:
 
         self.save_dng_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(save_frame, text="Save Original DNG Files", 
-                       variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
+                    variable=self.save_dng_var).pack(anchor=tk.W, padx=5, pady=2)
+        # === FOCUS CONTROL SECTION ===
+        focus_frame = ttk.LabelFrame(control_frame, text="Focus Control")
+        focus_frame.pack(fill=tk.X, pady=(0, 10))
 
+        self.focus_supported = {"cam0": False, "cam1": False}
+        self.focus_sliders = {}
+
+        for cam_label, cam_attr in [("cam0", "cam0"), ("cam1", "cam1")]:
+            cam_obj = getattr(self, cam_attr, None)
+            
+            try:
+                # Attempt to detect if focus control is supported
+                if cam_obj is None:
+                    continue
+
+                # Dummy call to check support
+                cam_obj.set_controls({"AfMode": 0})
+                cam_obj.set_controls({"LensPosition": 1.0})
+
+                self.focus_supported[cam_label] = True
+                frame = ttk.LabelFrame(focus_frame, text=f"Focus - {cam_label}")
+                frame.pack(fill=tk.X, padx=5, pady=2)
+
+                slider = ttk.Scale(
+                    frame,
+                    from_=0.0,
+                    to=10.0,
+                    orient=tk.HORIZONTAL,
+                    command=lambda val, c=cam_label: self.on_focus_change(c, float(val))
+                )
+                slider.set(1.0)
+                slider.pack(fill=tk.X, padx=5)
+                self.focus_sliders[cam_label] = slider
+
+                self.log_message(f"✓ Focus slider enabled for {cam_label}")
+
+            except Exception as e:
+                self.focus_supported[cam_label] = False
+                self.log_message(f"✗ Focus not supported for {cam_label}: {e}")
         # === MIDDLE PROCESSING FRAME - Actions First, Then Processing Controls ===
         
         # Action buttons (moved above processing controls)
@@ -621,6 +659,17 @@ class UltraSafeIMX708Viewer:
 
         # Start camera initialization in background
         threading.Thread(target=self.initialize_cameras, daemon=True).start()
+    
+    def on_focus_change(self, cam_label, value):
+        """Adjust focus (LensPosition) for supported cameras"""
+        cam_obj = getattr(self, cam_label, None)
+        if not self.focus_supported.get(cam_label, False) or cam_obj is None:
+            return
+        try:
+            cam_obj.set_controls({"AfMode": 0, "LensPosition": value})
+            self.log_message(f"{cam_label} focus set to {value:.2f}")
+        except Exception as e:
+            self.log_message(f"Failed to set focus for {cam_label}: {e}")
 
     def emergency_stop(self):
         """Emergency stop all operations"""
