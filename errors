@@ -47,3 +47,20 @@ Qt Platform: xcb
 QWidget: Must construct a QApplication before a QWidget
 Aborted
 (CamEnv) rpi@raspberrypi:~/Documents/Camera_GIT $ 
+
+
+Setting QT_QPA_PLATFORM_PLUGIN_PATH to avoid conflicts
+Qt Platform: xcb
+✅ PyQt5 imported successfully (preferred for Picamera2)
+✅ Picamera2 imported successfully
+✅ QGlPicamera2 and QPicamera2 imported successfully for PyQt5
+🎯 Using PyQt5 - optimal compatibility for Picamera2 Qt widgets
+✅ Image processing libraries available
+🚀 Starting Efficient Dual IMX708 Camera Control...
+QObject::moveToThread: Current thread (0x3f1f1870) is not the object's thread (0x3f976620).
+Cannot move to target thread (0x3f1f1870)
+
+qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "/home/rpi/Documents/Camera_GIT/Camera/CamEnv/lib/python3.11/site-packages/cv2/qt/plugins" even though it was found.
+This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.
+
+Available platform plugins are: xcb, eglfs, linuxfb, minimal, minimalegl, offscreen, vnc, wayland-egl, wayland, wayland-xcomposite-egl, wayland-xcomposite-glx.
