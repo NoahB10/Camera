@@ -8,3 +8,16 @@ Available platform plugins are: offscreen, wayland-egl, eglfs, minimal, vnc, vkk
 
 Aborted
 (CamEnv) rpi@raspberrypi:~/Documents/Camera_GIT $ 
+
+sing triggers for libc-bin (2.36-9+rpt2+deb12u10) ...
+(CamEnv) rpi@raspberrypi:~/Documents/Camera_GIT $ /home/rpi/Documents/Camera_GIT/Camera/CamEnv/bin/python /home/rpi/Documents/Camera_GIT/Camera/simple_dual_camera_gui_pyqt.py
+Initializing Simple Dual Camera Control GUI (PyQt5)...
+QObject::moveToThread: Current thread (0x272b0280) is not the object's thread (0x278848c0).
+Cannot move to target thread (0x272b0280)
+
+qt.qpa.plugin: Could not load the Qt platform plugin "xcb" in "/home/rpi/Documents/Camera_GIT/Camera/CamEnv/lib/python3.11/site-packages/cv2/qt/plugins" even though it was found.
+This application failed to start because no Qt platform plugin could be initialized. Reinstalling the application may fix this problem.
+
+Available platform plugins are: xcb, eglfs, linuxfb, minimal, minimalegl, offscreen, vnc, wayland-egl, wayland, wayland-xcomposite-egl, wayland-xcomposite-glx.
+
+Aborted
