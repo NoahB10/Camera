@@ -365,11 +365,6 @@ class EfficientDualCameraGUI(QMainWindow):
         self.setup_ui()
         self.load_settings()
         
-        # Initialize cameras after GUI is fully ready (must be after QApplication.exec starts)
-        self.camera_init_timer = QTimer()
-        self.camera_init_timer.setSingleShot(True)
-        self.camera_init_timer.timeout.connect(self.initialize_cameras)
-        # Don't start timer here - wait for showEvent
         
     def setup_ui(self):
         """Setup the main user interface"""
@@ -1631,12 +1626,11 @@ class EfficientDualCameraGUI(QMainWindow):
     def showEvent(self, event):
         """Override showEvent to initialize cameras after GUI is fully ready"""
         super().showEvent(event)
-        
-        # Only initialize cameras once, after the window is shown
-        if hasattr(self, 'camera_init_timer') and not hasattr(self, '_cameras_initialized'):
-            self.log_message("🔄 GUI fully loaded, starting camera initialization...")
+
+        if not hasattr(self, '_cameras_initialized') or not self._cameras_initialized:
             self._cameras_initialized = True
-            self.camera_init_timer.start(100)  # Small delay to ensure event loop is running
+            self.log_message("🔄 GUI fully loaded, starting camera initialization...")
+            QTimer.singleShot(300, self.initialize_cameras)
 
 
 def install_qt_dependencies():
