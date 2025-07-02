@@ -10,39 +10,74 @@ from datetime import datetime
 
 # Fix Qt platform plugin issues on Raspberry Pi and headless systems
 def setup_qt_environment():
-    """Setup Qt environment variables to handle platform issues"""
-    # Fix Qt platform plugin issues
+    """Setup Qt environment variables to fix OpenCV Qt conflicts and platform issues"""
+    
+    print("🔧 Setting up Qt environment...")
+    
+    # CRITICAL: Fix OpenCV Qt plugin conflicts that cause platform plugin errors
+    # OpenCV ships with Qt plugins that conflict with system Qt plugins
+    
+    # 1. Clear any existing OpenCV Qt plugin paths
+    current_plugin_path = os.environ.get('QT_QPA_PLATFORM_PLUGIN_PATH', '')
+    if current_plugin_path:
+        # Remove any OpenCV Qt plugin paths
+        paths = current_plugin_path.split(os.pathsep)
+        filtered_paths = []
+        for path in paths:
+            if 'cv2' not in path and 'opencv' not in path:
+                filtered_paths.append(path)
+        if filtered_paths != paths:
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.pathsep.join(filtered_paths)
+            print("🔧 Removed OpenCV Qt plugin paths from QT_QPA_PLATFORM_PLUGIN_PATH")
+    else:
+        # Explicitly set empty to prevent OpenCV interference
+        os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = ''
+        print("🔧 Set empty QT_QPA_PLATFORM_PLUGIN_PATH to prevent OpenCV conflicts")
+    
+    # 2. Disable OpenCV's Qt backend completely
+    os.environ['OPENCV_VIDEOIO_PRIORITY_MSMF'] = '0'
+    os.environ['OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS'] = '0'
+    
+    # 3. Set Qt platform appropriately
     if 'QT_QPA_PLATFORM' not in os.environ:
-        # Try to detect the best platform
-        if os.environ.get('DISPLAY'):
-            # We have a display, try xcb first
-            os.environ['QT_QPA_PLATFORM'] = 'xcb'
-        elif os.environ.get('WAYLAND_DISPLAY'):
-            # Wayland environment
+        # Detect environment
+        display = os.environ.get('DISPLAY', '')
+        wayland_display = os.environ.get('WAYLAND_DISPLAY', '')
+        
+        if wayland_display:
             os.environ['QT_QPA_PLATFORM'] = 'wayland'
+            print("🐧 Using Wayland platform")
+        elif display:
+            os.environ['QT_QPA_PLATFORM'] = 'xcb'
+            print("🐧 Using X11/xcb platform")
         else:
-            # Headless or VNC - try offscreen first
             os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+            print("🐧 No display detected, using offscreen platform")
     
-    # Fix OpenCV Qt plugin conflicts
-    if 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ:
-        # Remove OpenCV's Qt plugin path to avoid conflicts
-        cv2_qt_path = None
-        try:
-            import cv2
-            cv2_path = os.path.dirname(cv2.__file__)
-            cv2_qt_path = os.path.join(cv2_path, 'qt', 'plugins')
-            if os.path.exists(cv2_qt_path):
-                print(f"Detected OpenCV Qt plugins at: {cv2_qt_path}")
-                print("Setting QT_QPA_PLATFORM_PLUGIN_PATH to avoid conflicts")
-        except ImportError:
-            pass
+    # 4. Raspberry Pi specific optimizations
+    try:
+        with open('/proc/device-tree/model', 'r') as f:
+            model = f.read().lower()
+            if 'raspberry pi' in model:
+                print("🍓 Raspberry Pi detected - applying optimizations")
+                os.environ['QT_QPA_EGLFS_FORCE888'] = '1'
+                os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '0'
+                os.environ['QT_SCALE_FACTOR'] = '1'
+                # Disable problematic features on Pi
+                os.environ['QT_XCB_GL_INTEGRATION'] = 'none'
+                os.environ['QT_QUICK_BACKEND'] = 'software'
+    except:
+        # Not on Pi or can't detect
+        pass
     
-    # Additional environment fixes for Raspberry Pi
-    os.environ['QT_XCB_GL_INTEGRATION'] = 'none'  # Disable OpenGL integration
-    os.environ['QT_QUICK_BACKEND'] = 'software'   # Use software rendering
+    # 5. General Qt stability settings
+    os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.plugin.debug=false'
     
-    print(f"Qt Platform: {os.environ.get('QT_QPA_PLATFORM', 'default')}")
+    platform = os.environ.get('QT_QPA_PLATFORM', 'default')
+    print(f"Qt Platform: {platform}")
+    
+    # 6. Prevent threading issues
+    os.environ['QT_THREAD_POOL_MAX_THREADS'] = '4'
 
 # Setup Qt environment before importing Qt
 setup_qt_environment()
@@ -119,22 +154,48 @@ except ImportError as e:
     print("Running in simulation mode")
     CAMERA_AVAILABLE = False
 
-# Image processing imports
-try:
-    import discorpy.post.postprocessing as post
-    import imageio
-    import cv2
-    PROCESSING_AVAILABLE = True
-    print("✅ Image processing libraries available")
-except ImportError:
-    print("⚠️ Some processing libraries not available")
+# Image processing imports - CRITICAL: Import cv2 AFTER Qt to avoid threading issues
+PROCESSING_AVAILABLE = False
+cv2 = None
+
+def initialize_opencv():
+    """Initialize OpenCV after Qt is set up to avoid threading conflicts"""
+    global cv2, PROCESSING_AVAILABLE
+    
+    if cv2 is not None:
+        return  # Already initialized
+    
     try:
-        import cv2
-        print("✅ OpenCV available")
+        # Set OpenCV threading to single thread to avoid Qt conflicts
+        os.environ['OPENCV_THREADING'] = '0'
+        os.environ['OPENCV_NUM_THREADS'] = '1'
+        
+        # Import OpenCV after Qt initialization
+        import cv2 as cv2_module
+        cv2 = cv2_module
+        
+        # Disable OpenCV's Qt backend to prevent conflicts
+        if hasattr(cv2, 'setUseOptimized'):
+            cv2.setUseOptimized(True)
+        if hasattr(cv2, 'setNumThreads'):
+            cv2.setNumThreads(1)
+            
+        print("✅ OpenCV initialized after Qt setup")
+        
+        # Try other processing libraries
+        try:
+            import discorpy.post.postprocessing as post
+            import imageio
+            PROCESSING_AVAILABLE = True
+            print("✅ Image processing libraries available")
+        except ImportError:
+            print("⚠️ Some processing libraries not available, but OpenCV is ready")
+            PROCESSING_AVAILABLE = False
+            
     except ImportError:
         print("❌ OpenCV not available - preview fallback disabled")
         cv2 = None
-    PROCESSING_AVAILABLE = False
+        PROCESSING_AVAILABLE = False
 
 
 class LogWidget(QTextEdit):
@@ -378,6 +439,9 @@ class EfficientDualCameraGUI(QMainWindow):
         # GUI setup
         self.setup_ui()
         self.load_settings()
+        
+        # Initialize OpenCV for fallback preview mode
+        initialize_opencv()
         
         # Don't initialize cameras automatically - let user click reconnect
         self.log_message("✅ GUI loaded successfully. Click 'Reconnect Cameras' to initialize cameras.")
@@ -1890,6 +1954,9 @@ def main():
         app = QApplication(sys.argv)
         print("✅ Qt Application created successfully")
         
+        # CRITICAL: Initialize OpenCV AFTER Qt Application is created
+        initialize_opencv()
+        
         # Set application properties
         app.setApplicationName("Efficient Dual IMX708 Camera Control")
         app.setApplicationVersion("2.0.0")
@@ -1900,45 +1967,35 @@ def main():
         
         for platform in platforms_to_try:
             try:
-                if platform != os.environ.get('QT_QPA_PLATFORM'):
+                if platform != os.environ.get('QT_QPA_PLATFORM', ''):
                     print(f"🔄 Trying Qt platform: {platform}")
                     os.environ['QT_QPA_PLATFORM'] = platform
-                    
-                # Create and show main window
+                
+                # Create main window
                 window = EfficientDualCameraGUI()
                 window.show()
+                
                 print(f"✅ GUI started successfully with platform: {platform}")
                 break
                 
             except Exception as e:
-                print(f"❌ Failed with platform {platform}: {e}")
+                print(f"❌ Platform {platform} failed: {e}")
                 if window:
-                    try:
-                        window.close()
-                    except:
-                        pass
-                window = None
+                    window = None
                 continue
         
         if window is None:
-            print("❌ Failed to start GUI with any Qt platform")
-            install_qt_dependencies()
+            print("❌ All Qt platforms failed")
             return 1
-            
-        return app.exec()
+        
+        # Run the application
+        return app.exec_()
         
     except Exception as e:
-        print(f"❌ Critical Qt error: {e}")
-        install_qt_dependencies()
-        
-        # Fallback to CLI mode
-        print("\n" + "="*50)
-        response = input("Would you like to run camera test in CLI mode? (y/n): ")
-        if response.lower() in ['y', 'yes']:
-            success = run_cli_mode()
-            return 0 if success else 1
-        else:
-            return 1
+        print(f"❌ Failed to start GUI: {e}")
+        print("\nTrying CLI mode as fallback...")
+        success = run_cli_mode()
+        return 0 if success else 1
 
 
 if __name__ == "__main__":
