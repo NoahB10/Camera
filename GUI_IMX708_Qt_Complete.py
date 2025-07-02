@@ -365,8 +365,11 @@ class EfficientDualCameraGUI(QMainWindow):
         self.setup_ui()
         self.load_settings()
         
-        # Initialize cameras in background
-        QTimer.singleShot(100, self.initialize_cameras)
+        # Initialize cameras after GUI is fully ready (must be after QApplication.exec starts)
+        self.camera_init_timer = QTimer()
+        self.camera_init_timer.setSingleShot(True)
+        self.camera_init_timer.timeout.connect(self.initialize_cameras)
+        # Don't start timer here - wait for showEvent
         
     def setup_ui(self):
         """Setup the main user interface"""
@@ -741,15 +744,17 @@ class EfficientDualCameraGUI(QMainWindow):
                 )
                 self.cam0.configure(config0)
                 
-                # Create proper Qt widget for camera 0
+                # Create proper Qt widget for camera 0 (BEFORE starting camera)
                 if QGlPicamera2 is not None:
                     try:
+                        self.log_message("🔄 Creating QGlPicamera2 for Camera 0...")
                         self.preview0 = QGlPicamera2(self.cam0, width=400, height=300, keep_ar=True)
                         self.log_message("✅ Camera 0: QGlPicamera2 (hardware accelerated) created")
                     except Exception as e:
                         self.log_message(f"⚠️ Camera 0: QGlPicamera2 failed, trying QPicamera2: {e}")
                         if QPicamera2 is not None:
                             try:
+                                self.log_message("🔄 Creating QPicamera2 for Camera 0...")
                                 self.preview0 = QPicamera2(self.cam0, width=400, height=300, keep_ar=True)
                                 self.log_message("✅ Camera 0: QPicamera2 (software) created")
                             except Exception as e2:
@@ -759,6 +764,7 @@ class EfficientDualCameraGUI(QMainWindow):
                             self.preview0 = self.create_fallback_preview("Camera 0")
                 elif QPicamera2 is not None:
                     try:
+                        self.log_message("🔄 Creating QPicamera2 for Camera 0...")
                         self.preview0 = QPicamera2(self.cam0, width=400, height=300, keep_ar=True)
                         self.log_message("✅ Camera 0: QPicamera2 (software) created")
                     except Exception as e:
@@ -768,7 +774,8 @@ class EfficientDualCameraGUI(QMainWindow):
                     self.log_message("📺 Camera 0: Using QLabel fallback preview")
                     self.preview0 = self.create_fallback_preview("Camera 0")
                 
-                # Start camera
+                # Start camera AFTER creating Qt widget
+                self.log_message("🔄 Starting Camera 0...")
                 self.cam0.start()
                 self.cam0_connected = True
                 
@@ -799,15 +806,17 @@ class EfficientDualCameraGUI(QMainWindow):
                 )
                 self.cam1.configure(config1)
                 
-                # Create proper Qt widget for camera 1
+                # Create proper Qt widget for camera 1 (BEFORE starting camera)
                 if QGlPicamera2 is not None:
                     try:
+                        self.log_message("🔄 Creating QGlPicamera2 for Camera 1...")
                         self.preview1 = QGlPicamera2(self.cam1, width=400, height=300, keep_ar=True)
                         self.log_message("✅ Camera 1: QGlPicamera2 (hardware accelerated) created")
                     except Exception as e:
                         self.log_message(f"⚠️ Camera 1: QGlPicamera2 failed, trying QPicamera2: {e}")
                         if QPicamera2 is not None:
                             try:
+                                self.log_message("🔄 Creating QPicamera2 for Camera 1...")
                                 self.preview1 = QPicamera2(self.cam1, width=400, height=300, keep_ar=True)
                                 self.log_message("✅ Camera 1: QPicamera2 (software) created")
                             except Exception as e2:
@@ -817,6 +826,7 @@ class EfficientDualCameraGUI(QMainWindow):
                             self.preview1 = self.create_fallback_preview("Camera 1")
                 elif QPicamera2 is not None:
                     try:
+                        self.log_message("🔄 Creating QPicamera2 for Camera 1...")
                         self.preview1 = QPicamera2(self.cam1, width=400, height=300, keep_ar=True)
                         self.log_message("✅ Camera 1: QPicamera2 (software) created")
                     except Exception as e:
@@ -826,7 +836,8 @@ class EfficientDualCameraGUI(QMainWindow):
                     self.log_message("📺 Camera 1: Using QLabel fallback preview")
                     self.preview1 = self.create_fallback_preview("Camera 1")
                 
-                # Start camera
+                # Start camera AFTER creating Qt widget
+                self.log_message("🔄 Starting Camera 1...")
                 self.cam1.start()
                 self.cam1_connected = True
                 
@@ -845,7 +856,8 @@ class EfficientDualCameraGUI(QMainWindow):
                 self.cam1_connected = False
                 self.preview1 = None
                 
-            # Setup preview layout
+            # Setup preview layout AFTER creating all widgets
+            self.log_message("🔄 Setting up preview widget layout...")
             self.setup_preview_widgets()
             
             # Start preview update timer if using fallback previews
@@ -859,6 +871,8 @@ class EfficientDualCameraGUI(QMainWindow):
             
             # Update status
             self.update_connection_status()
+            
+            self.log_message("✅ Camera initialization complete!")
             
         except Exception as e:
             self.log_message(f"❌ Camera initialization error: {e}")
@@ -999,9 +1013,16 @@ class EfficientDualCameraGUI(QMainWindow):
             layout = QHBoxLayout(self.preview_container)
             
         # Add preview widgets or placeholders
+        widgets_added = 0
+        
         if self.preview0:
-            layout.addWidget(self.preview0)
-            self.preview0.show()
+            try:
+                layout.addWidget(self.preview0)
+                self.preview0.show()
+                widgets_added += 1
+                self.log_message("✅ Preview 0 widget added to layout")
+            except Exception as e:
+                self.log_message(f"❌ Failed to add preview0 to layout: {e}")
         elif self.cam0_connected:
             # Camera connected but no preview - show placeholder
             placeholder0 = QLabel("Camera 0\nConnected\n(Preview not available)")
@@ -1012,10 +1033,16 @@ class EfficientDualCameraGUI(QMainWindow):
             )
             placeholder0.setMinimumSize(400, 300)
             layout.addWidget(placeholder0)
+            widgets_added += 1
             
         if self.preview1:
-            layout.addWidget(self.preview1)
-            self.preview1.show()
+            try:
+                layout.addWidget(self.preview1)
+                self.preview1.show()
+                widgets_added += 1
+                self.log_message("✅ Preview 1 widget added to layout")
+            except Exception as e:
+                self.log_message(f"❌ Failed to add preview1 to layout: {e}")
         elif self.cam1_connected:
             # Camera connected but no preview - show placeholder
             placeholder1 = QLabel("Camera 1\nConnected\n(Preview not available)")
@@ -1026,6 +1053,7 @@ class EfficientDualCameraGUI(QMainWindow):
             )
             placeholder1.setMinimumSize(400, 300)
             layout.addWidget(placeholder1)
+            widgets_added += 1
             
         # If no cameras at all
         if not self.cam0_connected and not self.cam1_connected:
@@ -1073,6 +1101,10 @@ class EfficientDualCameraGUI(QMainWindow):
                 status_msg = f"QLabel fallback preview active ({fallback_count} camera(s))"
             
         self.preview_status.setText(status_msg)
+        self.log_message(f"📺 Preview status: {status_msg}")
+        
+        # Log widget count in layout  
+        self.log_message(f"📊 Total widgets in preview layout: {widgets_added}")
         
     def on_fps_changed(self, fps_text):
         """Handle FPS combo box changes"""
@@ -1595,6 +1627,16 @@ class EfficientDualCameraGUI(QMainWindow):
             pass
             
         event.accept()
+        
+    def showEvent(self, event):
+        """Override showEvent to initialize cameras after GUI is fully ready"""
+        super().showEvent(event)
+        
+        # Only initialize cameras once, after the window is shown
+        if hasattr(self, 'camera_init_timer') and not hasattr(self, '_cameras_initialized'):
+            self.log_message("🔄 GUI fully loaded, starting camera initialization...")
+            self._cameras_initialized = True
+            self.camera_init_timer.start(100)  # Small delay to ensure event loop is running
 
 
 def install_qt_dependencies():
