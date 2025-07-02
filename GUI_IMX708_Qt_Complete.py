@@ -47,34 +47,40 @@ def setup_qt_environment():
 # Setup Qt environment before importing Qt
 setup_qt_environment()
 
-# Qt imports with error handling
+# Qt imports with error handling - PREFER PyQt5 for Picamera2 compatibility
 QT_AVAILABLE = True
+QT_FRAMEWORK = None
+
 try:
-    from PySide6.QtWidgets import (
+    # Try PyQt5 FIRST for better Picamera2 compatibility
+    from PyQt5.QtWidgets import (
         QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QTabWidget, QGroupBox, QLabel, QSlider, QLineEdit, QPushButton, QCheckBox,
         QTextEdit, QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QComboBox,
         QMessageBox, QFileDialog, QFormLayout, QScrollArea
     )
-    from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
-    from PySide6.QtGui import QFont, QTextCursor
-    print("✅ PySide6 imported successfully")
+    from PyQt5.QtCore import Qt, QTimer, pyqtSignal as Signal, QThread, QObject
+    from PyQt5.QtGui import QFont, QTextCursor, QPixmap, QImage
+    QT_FRAMEWORK = "PyQt5"
+    print("✅ PyQt5 imported successfully (preferred for Picamera2)")
 except ImportError as e:
-    print(f"❌ PySide6 import failed: {e}")
-    print("Trying PyQt5 as fallback...")
+    print(f"⚠️ PyQt5 import failed: {e}")
+    print("Trying PySide6 as fallback...")
     try:
-        from PyQt5.QtWidgets import (
+        from PySide6.QtWidgets import (
             QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
             QTabWidget, QGroupBox, QLabel, QSlider, QLineEdit, QPushButton, QCheckBox,
             QTextEdit, QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QComboBox,
             QMessageBox, QFileDialog, QFormLayout, QScrollArea
         )
-        from PyQt5.QtCore import Qt, QTimer, pyqtSignal as Signal, QThread, QObject
-        from PyQt5.QtGui import QFont, QTextCursor
-        print("✅ PyQt5 imported successfully")
+        from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
+        from PySide6.QtGui import QFont, QTextCursor, QPixmap, QImage
+        QT_FRAMEWORK = "PySide6"
+        print("✅ PySide6 imported successfully (fallback)")
     except ImportError:
-        print("❌ Both PySide6 and PyQt5 failed to import")
+        print("❌ Both PyQt5 and PySide6 failed to import")
         QT_AVAILABLE = False
+        QT_FRAMEWORK = None
 
 # Camera imports
 CAMERA_AVAILABLE = True
@@ -86,13 +92,21 @@ try:
     print("✅ Picamera2 imported successfully")
     
     # Import proper Qt widgets if Qt is available
-    if QT_AVAILABLE:
+    if QT_AVAILABLE and QT_FRAMEWORK:
         try:
             from picamera2.previews.qt import QGlPicamera2, QPicamera2
-            print("✅ QGlPicamera2 and QPicamera2 imported successfully")
+            print(f"✅ QGlPicamera2 and QPicamera2 imported successfully for {QT_FRAMEWORK}")
+            
+            # Verify compatibility
+            if QT_FRAMEWORK == "PyQt5":
+                print("🎯 Using PyQt5 - optimal compatibility for Picamera2 Qt widgets")
+            else:
+                print("⚠️ Using PySide6 - may have compatibility issues with Picamera2 Qt widgets")
+                
         except ImportError as e:
-            print(f"⚠️ Picamera2 Qt widgets import failed: {e}")
-            print("Preview will use custom fallback mode")
+            print(f"❌ Picamera2 Qt widgets import failed: {e}")
+            print(f"   This may be due to {QT_FRAMEWORK} compatibility issues")
+            print("   Preview will use custom fallback mode")
             QGlPicamera2 = None
             QPicamera2 = None
     else:
@@ -373,7 +387,8 @@ class EfficientDualCameraGUI(QMainWindow):
         
     def setup_ui(self):
         """Setup the main user interface"""
-        self.setWindowTitle("Efficient Dual IMX708 Camera Control with Picamera2 Qt Widgets")
+        title = f"Efficient Dual IMX708 Camera Control ({QT_FRAMEWORK}) with Picamera2 Qt Widgets"
+        self.setWindowTitle(title)
         self.setGeometry(100, 100, 1600, 1000)
         
         # Central widget
@@ -681,13 +696,20 @@ class EfficientDualCameraGUI(QMainWindow):
         self.save_settings_btn.clicked.connect(self.save_settings)
         actions_layout.addWidget(self.save_settings_btn)
         
-        self.reconnect_btn = QPushButton("🔌 Reconnect Cameras")
+        self.reconnect_btn = QPushButton("🔌 Connect Cameras")
         self.reconnect_btn.clicked.connect(self.reconnect_cameras)
+        self.reconnect_btn.setToolTip("Initialize and connect to available IMX708 cameras")
         actions_layout.addWidget(self.reconnect_btn)
         
-        self.emergency_btn = QPushButton("🛑 Emergency Stop")
+        self.test_btn = QPushButton("🧪 Test Cameras & Capture")
+        self.test_btn.clicked.connect(self.test_capture)
+        self.test_btn.setToolTip("Test camera connectivity and capture sample photos")
+        actions_layout.addWidget(self.test_btn)
+        
+        self.emergency_btn = QPushButton("🚨 EMERGENCY STOP")
         self.emergency_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; }")
         self.emergency_btn.clicked.connect(self.emergency_stop)
+        self.emergency_btn.setToolTip("Stop all camera operations immediately")
         actions_layout.addWidget(self.emergency_btn)
         
         layout.addWidget(actions_group)
@@ -1329,32 +1351,122 @@ class EfficientDualCameraGUI(QMainWindow):
                 self.log_message(f"⚠️ Failed to apply settings to camera 1: {e}")
                 
     def test_capture(self):
-        """Test image capture from connected cameras"""
-        self.log_message("🧪 Testing image capture...")
+        """Comprehensive test of camera connection and photo capture capability"""
+        self.log_message("🧪 Starting comprehensive camera test...")
+        
+        if not self.cam0_connected and not self.cam1_connected:
+            self.log_message("❌ No cameras connected. Click 'Reconnect Cameras' first.")
+            QMessageBox.warning(self, "No Cameras", "No cameras connected. Click 'Reconnect Cameras' first.")
+            return
+        
+        success_count = 0
+        total_cameras = 0
         
         try:
+            # Test Camera 0
             if self.cam0_connected and self.cam0:
-                req0 = self.cam0.capture_request()
-                if req0:
-                    array = req0.make_array("main")
-                    self.log_message(f"✅ Cam0: {array.shape}, dtype: {array.dtype}, range: [{array.min()}-{array.max()}]")
-                    req0.release()
-                else:
-                    self.log_message("❌ Cam0: Capture request failed")
+                total_cameras += 1
+                self.log_message("🔍 Testing Camera 0...")
+                
+                try:
+                    # Test capture request
+                    req0 = self.cam0.capture_request()
+                    if req0:
+                        array = req0.make_array("main")
+                        self.log_message(f"✅ Cam0 Array: {array.shape}, dtype: {array.dtype}, range: [{array.min()}-{array.max()}]")
+                        
+                        # Test photo capture
+                        photo_path = f"test_cam0_{int(time.time())}.jpg"
+                        if self.save_test_photo(req0, photo_path, "Camera 0"):
+                            success_count += 1
+                        
+                        req0.release()
+                    else:
+                        self.log_message("❌ Cam0: Capture request failed")
+                        
+                    # Test metadata
+                    metadata = self.cam0.capture_metadata()
+                    if metadata:
+                        exposure = metadata.get("ExposureTime", "Unknown")
+                        gain = metadata.get("AnalogueGain", "Unknown") 
+                        self.log_message(f"✅ Cam0 Metadata: Exposure={exposure}, Gain={gain}")
+                    else:
+                        self.log_message("⚠️ Cam0: No metadata available")
+                        
+                except Exception as e:
+                    self.log_message(f"❌ Cam0 test failed: {e}")
                     
+            # Test Camera 1
             if self.cam1_connected and self.cam1:
-                req1 = self.cam1.capture_request()
-                if req1:
-                    array = req1.make_array("main")
-                    self.log_message(f"✅ Cam1: {array.shape}, dtype: {array.dtype}, range: [{array.min()}-{array.max()}]")
-                    req1.release()
-                else:
-                    self.log_message("❌ Cam1: Capture request failed")
+                total_cameras += 1
+                self.log_message("🔍 Testing Camera 1...")
+                
+                try:
+                    # Test capture request
+                    req1 = self.cam1.capture_request()
+                    if req1:
+                        array = req1.make_array("main")
+                        self.log_message(f"✅ Cam1 Array: {array.shape}, dtype: {array.dtype}, range: [{array.min()}-{array.max()}]")
+                        
+                        # Test photo capture
+                        photo_path = f"test_cam1_{int(time.time())}.jpg"
+                        if self.save_test_photo(req1, photo_path, "Camera 1"):
+                            success_count += 1
+                            
+                        req1.release()
+                    else:
+                        self.log_message("❌ Cam1: Capture request failed")
+                        
+                    # Test metadata
+                    metadata = self.cam1.capture_metadata()
+                    if metadata:
+                        exposure = metadata.get("ExposureTime", "Unknown")
+                        gain = metadata.get("AnalogueGain", "Unknown")
+                        self.log_message(f"✅ Cam1 Metadata: Exposure={exposure}, Gain={gain}")
+                    else:
+                        self.log_message("⚠️ Cam1: No metadata available")
+                        
+                except Exception as e:
+                    self.log_message(f"❌ Cam1 test failed: {e}")
                     
-            self.log_message("🧪 Test capture completed")
+            # Summary
+            self.log_message(f"🧪 Test completed: {success_count}/{total_cameras} cameras working")
+            
+            if success_count == total_cameras:
+                self.log_message("🎉 All connected cameras are working perfectly!")
+                QMessageBox.information(self, "Test Success", 
+                                      f"✅ All {total_cameras} cameras tested successfully!\n"
+                                      f"Photos captured and saved for verification.")
+            elif success_count > 0:
+                QMessageBox.warning(self, "Partial Success", 
+                                  f"⚠️ {success_count}/{total_cameras} cameras working.\n"
+                                  f"Check log for details.")
+            else:
+                QMessageBox.critical(self, "Test Failed", 
+                                   "❌ No cameras working properly.\n"
+                                   "Check connections and try reconnecting.")
             
         except Exception as e:
             self.log_message(f"❌ Test capture error: {e}")
+            QMessageBox.critical(self, "Test Error", f"Camera test failed:\n{str(e)}")
+            
+    def save_test_photo(self, request, filename, camera_name):
+        """Save a test photo from capture request"""
+        try:
+            # Save as JPEG for quick verification
+            request.save(filename)
+            file_size = os.path.getsize(filename) if os.path.exists(filename) else 0
+            
+            if file_size > 1000:  # At least 1KB
+                self.log_message(f"✅ {camera_name}: Test photo saved - {filename} ({file_size} bytes)")
+                return True
+            else:
+                self.log_message(f"❌ {camera_name}: Test photo too small or failed - {filename}")
+                return False
+                
+        except Exception as e:
+            self.log_message(f"❌ {camera_name}: Failed to save test photo - {e}")
+            return False
             
     def save_images(self):
         """Save images with processing"""
@@ -1537,9 +1649,59 @@ class EfficientDualCameraGUI(QMainWindow):
         except Exception as e:
             self.log_message(f"⚠️ Failed to load settings: {e}")
             
+    def check_camera_connections(self):
+        """Check for available IMX708 cameras and return connection info"""
+        if not CAMERA_AVAILABLE:
+            return []
+        
+        available_cameras = []
+        self.log_message("🔍 Scanning for IMX708 cameras...")
+        
+        # Check camera indices 0-3 for IMX708 sensors
+        for cam_idx in range(4):
+            try:
+                temp_cam = Picamera2(cam_idx)
+                camera_info = temp_cam.camera_properties
+                sensor_model = camera_info.get('Model', 'Unknown')
+                
+                temp_cam.close()
+                
+                # Check if it's an IMX708
+                if 'imx708' in sensor_model.lower():
+                    available_cameras.append({
+                        'index': cam_idx,
+                        'model': sensor_model,
+                        'properties': camera_info
+                    })
+                    self.log_message(f"✅ Found IMX708 camera at index {cam_idx}: {sensor_model}")
+                else:
+                    self.log_message(f"⚠️ Camera at index {cam_idx} is not IMX708: {sensor_model}")
+                    
+            except Exception as e:
+                # This is expected for non-existent cameras
+                continue
+                
+        if not available_cameras:
+            self.log_message("❌ No IMX708 cameras detected")
+        else:
+            self.log_message(f"🎯 Found {len(available_cameras)} IMX708 camera(s)")
+            
+        return available_cameras
+    
     def reconnect_cameras(self):
-        """Reconnect cameras"""
+        """Reconnect cameras with enhanced detection and PyQt5 compatibility"""
         self.log_message("🔌 Reconnecting cameras...")
+        self.log_message(f"🔧 Using Qt Framework: {QT_FRAMEWORK}")
+        
+        # First check what cameras are available
+        available_cameras = self.check_camera_connections()
+        
+        if not available_cameras:
+            self.log_message("❌ No IMX708 cameras found. Check hardware connections.")
+            QMessageBox.warning(self, "No Cameras", 
+                              "No IMX708 cameras detected.\n"
+                              "Please check hardware connections and try again.")
+            return
         
         # Stop preview timer
         if hasattr(self, 'preview_timer') and self.preview_timer is not None:
@@ -1550,13 +1712,18 @@ class EfficientDualCameraGUI(QMainWindow):
         if self.cam0:
             try:
                 self.cam0.stop()
-            except:
-                pass
+                self.cam0.close()
+                self.log_message("🔄 Camera 0 stopped")
+            except Exception as e:
+                self.log_message(f"⚠️ Error stopping camera 0: {e}")
+                
         if self.cam1:
             try:
                 self.cam1.stop()
-            except:
-                pass
+                self.cam1.close()
+                self.log_message("🔄 Camera 1 stopped")
+            except Exception as e:
+                self.log_message(f"⚠️ Error stopping camera 1: {e}")
                 
         # Clear previews
         if self.preview0:
@@ -1570,6 +1737,9 @@ class EfficientDualCameraGUI(QMainWindow):
         self.preview1 = None
         self.cam0_connected = False
         self.cam1_connected = False
+        
+        # Wait for cleanup
+        time.sleep(0.5)
         
         # Reinitialize
         QTimer.singleShot(1000, self.initialize_cameras)
