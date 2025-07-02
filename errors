@@ -21,3 +21,29 @@ This application failed to start because no Qt platform plugin could be initiali
 Available platform plugins are: xcb, eglfs, linuxfb, minimal, minimalegl, offscreen, vnc, wayland-egl, wayland, wayland-xcomposite-egl, wayland-xcomposite-glx.
 
 Aborted
+
+
+/home/rpi/Documents/Camera_GIT/Camera/CamEnv/bin/python /home/rpi/Documents/Camera_GIT/Camera/GUI_IMX708_Qt_Complete.py
+(CamEnv) rpi@raspberrypi:~/Documents/Camera_GIT $ /home/rpi/Documents/Camera_GIT/Camera/CamEnv/bin/python /home/rpi/Documents/Camera_GIT/Camera/GUI_IMX708_Qt_Complete.py
+Detected OpenCV Qt plugins at: /home/rpi/Documents/Camera_GIT/Camera/CamEnv/lib/python3.11/site-packages/cv2/qt/plugins
+Setting QT_QPA_PLATFORM_PLUGIN_PATH to avoid conflicts
+Qt Platform: xcb
+✅ PySide6 imported successfully
+✅ Picamera2 imported successfully
+✅ QGlPicamera2 and QPicamera2 imported successfully
+✅ Image processing libraries available
+🚀 Starting Efficient Dual IMX708 Camera Control...
+✅ Qt Application created successfully
+✅ GUI started successfully with platform: xcb
+[16:14:58] 🔄 Initializing cameras with proper Picamera2 Qt widgets...
+[16:14:58] 📷 Initializing Camera 0...
+[0:01:46.071161200] [4238]  INFO Camera camera_manager.cpp:326 libcamera v0.5.0+84-79f583c3-dirty (2025-05-06T02:52:19BST)
+[0:01:46.092287145] [4262]  INFO RPI pisp.cpp:720 libpisp version v1.2.1 981977ff21f3 29-04-2025 (14:13:50)
+[0:01:46.111540072] [4262]  INFO RPI pisp.cpp:1180 Registered camera /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a to CFE device /dev/media2 and ISP device /dev/media0 using PiSP variant BCM2712_D0
+[0:01:46.111683589] [4262]  INFO RPI pisp.cpp:720 libpisp version v1.2.1 981977ff21f3 29-04-2025 (14:13:50)
+[0:01:46.124933518] [4262]  INFO RPI pisp.cpp:1180 Registered camera /base/axi/pcie@1000120000/rp1/i2c@80000/imx519@1a to CFE device /dev/media4 and ISP device /dev/media1 using PiSP variant BCM2712_D0
+[0:01:46.138099317] [4238]  INFO Camera camera.cpp:1205 configuring streams: (0) 820x616-XBGR8888 (1) 1536x864-BGGR_PISP_COMP1
+[0:01:46.140269797] [4262]  INFO RPI pisp.cpp:1484 Sensor: /base/axi/pcie@1000120000/rp1/i2c@88000/imx708@1a - Selected sensor format: 1536x864-SBGGR10_1X10 - Selected CFE format: 1536x864-PC1B
+QWidget: Must construct a QApplication before a QWidget
+Aborted
+(CamEnv) rpi@raspberrypi:~/Documents/Camera_GIT $ 
