@@ -8,23 +8,98 @@ import threading
 import numpy as np
 from datetime import datetime
 
-# Qt imports
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QTabWidget, QGroupBox, QLabel, QSlider, QLineEdit, QPushButton, QCheckBox,
-    QTextEdit, QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QComboBox,
-    QMessageBox, QFileDialog, QFormLayout, QScrollArea
-)
-from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
-from PySide6.QtGui import QFont, QTextCursor
+# Fix Qt platform plugin issues on Raspberry Pi and headless systems
+def setup_qt_environment():
+    """Setup Qt environment variables to handle platform issues"""
+    # Fix Qt platform plugin issues
+    if 'QT_QPA_PLATFORM' not in os.environ:
+        # Try to detect the best platform
+        if os.environ.get('DISPLAY'):
+            # We have a display, try xcb first
+            os.environ['QT_QPA_PLATFORM'] = 'xcb'
+        elif os.environ.get('WAYLAND_DISPLAY'):
+            # Wayland environment
+            os.environ['QT_QPA_PLATFORM'] = 'wayland'
+        else:
+            # Headless or VNC - try offscreen first
+            os.environ['QT_QPA_PLATFORM'] = 'offscreen'
+    
+    # Fix OpenCV Qt plugin conflicts
+    if 'QT_QPA_PLATFORM_PLUGIN_PATH' not in os.environ:
+        # Remove OpenCV's Qt plugin path to avoid conflicts
+        cv2_qt_path = None
+        try:
+            import cv2
+            cv2_path = os.path.dirname(cv2.__file__)
+            cv2_qt_path = os.path.join(cv2_path, 'qt', 'plugins')
+            if os.path.exists(cv2_qt_path):
+                print(f"Detected OpenCV Qt plugins at: {cv2_qt_path}")
+                print("Setting QT_QPA_PLATFORM_PLUGIN_PATH to avoid conflicts")
+        except ImportError:
+            pass
+    
+    # Additional environment fixes for Raspberry Pi
+    os.environ['QT_XCB_GL_INTEGRATION'] = 'none'  # Disable OpenGL integration
+    os.environ['QT_QUICK_BACKEND'] = 'software'   # Use software rendering
+    
+    print(f"Qt Platform: {os.environ.get('QT_QPA_PLATFORM', 'default')}")
+
+# Setup Qt environment before importing Qt
+setup_qt_environment()
+
+# Qt imports with error handling
+QT_AVAILABLE = True
+try:
+    from PySide6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+        QTabWidget, QGroupBox, QLabel, QSlider, QLineEdit, QPushButton, QCheckBox,
+        QTextEdit, QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QComboBox,
+        QMessageBox, QFileDialog, QFormLayout, QScrollArea
+    )
+    from PySide6.QtCore import Qt, QTimer, Signal, QThread, QObject
+    from PySide6.QtGui import QFont, QTextCursor
+    print("✅ PySide6 imported successfully")
+except ImportError as e:
+    print(f"❌ PySide6 import failed: {e}")
+    print("Trying PyQt5 as fallback...")
+    try:
+        from PyQt5.QtWidgets import (
+            QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+            QTabWidget, QGroupBox, QLabel, QSlider, QLineEdit, QPushButton, QCheckBox,
+            QTextEdit, QSplitter, QFrame, QSpinBox, QDoubleSpinBox, QComboBox,
+            QMessageBox, QFileDialog, QFormLayout, QScrollArea
+        )
+        from PyQt5.QtCore import Qt, QTimer, pyqtSignal as Signal, QThread, QObject
+        from PyQt5.QtGui import QFont, QTextCursor
+        print("✅ PyQt5 imported successfully")
+    except ImportError:
+        print("❌ Both PySide6 and PyQt5 failed to import")
+        QT_AVAILABLE = False
 
 # Camera imports
+CAMERA_AVAILABLE = True
+QtGlPreview = None
+
 try:
     from picamera2 import Picamera2
-    from picamera2.previews.qt import QtGlPreview
-    CAMERA_AVAILABLE = True
-except ImportError:
-    print("Picamera2 not available - running in simulation mode")
+    print("✅ Picamera2 imported successfully")
+    
+    # Only import Qt preview if Qt is available
+    if QT_AVAILABLE:
+        try:
+            from picamera2.previews.qt import QtGlPreview
+            print("✅ QtGlPreview imported successfully")
+        except ImportError as e:
+            print(f"⚠️ QtGlPreview import failed: {e}")
+            print("Preview will use fallback mode")
+            QtGlPreview = None
+    else:
+        print("⚠️ Qt not available - QtGlPreview disabled")
+        QtGlPreview = None
+        
+except ImportError as e:
+    print(f"❌ Picamera2 not available: {e}")
+    print("Running in simulation mode")
     CAMERA_AVAILABLE = False
 
 # Image processing imports
@@ -623,13 +698,16 @@ class EfficientDualCameraGUI(QMainWindow):
         self.log_widget.log_message(message)
         
     def initialize_cameras(self):
-        """Initialize cameras with QtGlPreview integration"""
+        """Initialize cameras with QtGlPreview integration or fallback"""
         if not CAMERA_AVAILABLE:
             self.log_message("❌ Picamera2 not available - running in simulation mode")
             self.preview_status.setText("Simulation mode - No cameras")
             return
             
-        self.log_message("🔄 Initializing cameras with Qt preview...")
+        if QtGlPreview is None:
+            self.log_message("⚠️ QtGlPreview not available - initializing cameras without preview")
+        else:
+            self.log_message("🔄 Initializing cameras with Qt preview...")
         
         try:
             # Initialize Camera 0
@@ -637,9 +715,17 @@ class EfficientDualCameraGUI(QMainWindow):
                 self.log_message("📷 Initializing Camera 0...")
                 self.cam0 = Picamera2(0)
                 
-                # Create Qt preview for camera 0
-                self.preview0 = QtGlPreview(self.cam0)
-                self.preview0.setMinimumSize(400, 300)
+                # Create Qt preview for camera 0 if available
+                if QtGlPreview is not None:
+                    try:
+                        self.preview0 = QtGlPreview(self.cam0)
+                        self.preview0.setMinimumSize(400, 300)
+                        self.log_message("✅ Camera 0: Qt preview created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 0: Qt preview failed, continuing without: {e}")
+                        self.preview0 = None
+                else:
+                    self.preview0 = None
                 
                 # Configure camera
                 config0 = self.cam0.create_preview_configuration(
@@ -648,24 +734,34 @@ class EfficientDualCameraGUI(QMainWindow):
                 )
                 self.cam0.configure(config0)
                 
-                # Start camera and preview
+                # Start camera
                 self.cam0.start()
                 self.cam0_connected = True
                 
-                self.log_message("✅ Camera 0 initialized with Qt preview")
+                preview_msg = "with Qt preview" if self.preview0 else "without preview"
+                self.log_message(f"✅ Camera 0 initialized {preview_msg}")
                 
             except Exception as e:
                 self.log_message(f"❌ Camera 0 failed: {e}")
                 self.cam0_connected = False
+                self.preview0 = None
                 
             # Initialize Camera 1
             try:
                 self.log_message("📷 Initializing Camera 1...")
                 self.cam1 = Picamera2(1)
                 
-                # Create Qt preview for camera 1
-                self.preview1 = QtGlPreview(self.cam1)
-                self.preview1.setMinimumSize(400, 300)
+                # Create Qt preview for camera 1 if available
+                if QtGlPreview is not None:
+                    try:
+                        self.preview1 = QtGlPreview(self.cam1)
+                        self.preview1.setMinimumSize(400, 300)
+                        self.log_message("✅ Camera 1: Qt preview created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 1: Qt preview failed, continuing without: {e}")
+                        self.preview1 = None
+                else:
+                    self.preview1 = None
                 
                 # Configure camera
                 config1 = self.cam1.create_preview_configuration(
@@ -674,15 +770,17 @@ class EfficientDualCameraGUI(QMainWindow):
                 )
                 self.cam1.configure(config1)
                 
-                # Start camera and preview
+                # Start camera
                 self.cam1.start()
                 self.cam1_connected = True
                 
-                self.log_message("✅ Camera 1 initialized with Qt preview")
+                preview_msg = "with Qt preview" if self.preview1 else "without preview"
+                self.log_message(f"✅ Camera 1 initialized {preview_msg}")
                 
             except Exception as e:
                 self.log_message(f"❌ Camera 1 failed: {e}")
                 self.cam1_connected = False
+                self.preview1 = None
                 
             # Setup preview layout
             self.setup_preview_widgets()
@@ -701,9 +799,6 @@ class EfficientDualCameraGUI(QMainWindow):
             
     def setup_preview_widgets(self):
         """Setup the preview widgets in the container"""
-        if not (self.preview0 or self.preview1):
-            return
-            
         # Clear existing layout
         layout = self.preview_container.layout()
         if layout:
@@ -714,21 +809,55 @@ class EfficientDualCameraGUI(QMainWindow):
         else:
             layout = QHBoxLayout(self.preview_container)
             
-        # Add preview widgets
+        # Add preview widgets or placeholders
         if self.preview0:
             layout.addWidget(self.preview0)
             self.preview0.show()
+        elif self.cam0_connected:
+            # Camera connected but no preview - show placeholder
+            placeholder0 = QLabel("Camera 0\nConnected\n(Preview not available)")
+            placeholder0.setAlignment(Qt.AlignCenter)
+            placeholder0.setStyleSheet(
+                "color: #4CAF50; font-size: 14pt; font-weight: bold; "
+                "border: 2px solid #4CAF50; border-radius: 10px; padding: 20px;"
+            )
+            placeholder0.setMinimumSize(400, 300)
+            layout.addWidget(placeholder0)
             
         if self.preview1:
             layout.addWidget(self.preview1)
             self.preview1.show()
+        elif self.cam1_connected:
+            # Camera connected but no preview - show placeholder
+            placeholder1 = QLabel("Camera 1\nConnected\n(Preview not available)")
+            placeholder1.setAlignment(Qt.AlignCenter)
+            placeholder1.setStyleSheet(
+                "color: #4CAF50; font-size: 14pt; font-weight: bold; "
+                "border: 2px solid #4CAF50; border-radius: 10px; padding: 20px;"
+            )
+            placeholder1.setMinimumSize(400, 300)
+            layout.addWidget(placeholder1)
             
-        if not self.preview0 and not self.preview1:
-            # Show placeholder
-            placeholder = QLabel("No cameras connected")
+        # If no cameras at all
+        if not self.cam0_connected and not self.cam1_connected:
+            placeholder = QLabel("No Cameras Connected\n\nClick 'Reconnect Cameras' to try again")
             placeholder.setAlignment(Qt.AlignCenter)
-            placeholder.setStyleSheet("color: #888; font-size: 16pt;")
+            placeholder.setStyleSheet(
+                "color: #f44336; font-size: 16pt; font-weight: bold; "
+                "border: 2px solid #f44336; border-radius: 10px; padding: 30px;"
+            )
             layout.addWidget(placeholder)
+            
+        # Show preview status
+        if QtGlPreview is None:
+            status_msg = "Cameras initialized without Qt preview (QtGlPreview not available)"
+        elif not (self.preview0 or self.preview1):
+            status_msg = "Cameras connected - Preview disabled"
+        else:
+            preview_count = sum([1 for p in [self.preview0, self.preview1] if p is not None])
+            status_msg = f"Hardware-accelerated preview active ({preview_count} camera(s))"
+            
+        self.preview_status.setText(status_msg)
             
     def detect_focus_capabilities(self):
         """Detect and setup focus controls for cameras that support it"""
@@ -1216,20 +1345,147 @@ class EfficientDualCameraGUI(QMainWindow):
         event.accept()
 
 
+def install_qt_dependencies():
+    """Provide instructions for installing Qt dependencies"""
+    print("\n" + "="*60)
+    print("🔧 QT DEPENDENCIES INSTALLATION GUIDE")
+    print("="*60)
+    print("\nTo fix Qt platform plugin issues on Raspberry Pi:")
+    print("\n1. Install required system packages:")
+    print("   sudo apt update")
+    print("   sudo apt install -y libxcb-cursor0 libxcb-cursor-dev")
+    print("   sudo apt install -y qt6-base-dev qt6-wayland")
+    print("   sudo apt install -y libqt6widgets6 libqt6gui6 libqt6core6")
+    print("\n2. Install Python Qt packages:")
+    print("   pip install PySide6")
+    print("   # OR alternatively:")
+    print("   pip install PyQt5")
+    print("\n3. For headless operation (SSH/VNC):")
+    print("   export QT_QPA_PLATFORM=offscreen")
+    print("   export DISPLAY=:0  # if using VNC")
+    print("\n4. For X11 forwarding over SSH:")
+    print("   ssh -X user@raspberry-pi-ip")
+    print("="*60)
+
+def run_cli_mode():
+    """Run a simple command-line interface when Qt is not available"""
+    print("\n" + "="*50)
+    print("📟 COMMAND LINE MODE")
+    print("="*50)
+    print("Qt GUI not available. Running basic camera test...")
+    
+    if not CAMERA_AVAILABLE:
+        print("❌ No camera libraries available")
+        return False
+    
+    try:
+        # Simple camera test
+        print("🔄 Testing camera connection...")
+        cam = Picamera2(0)
+        config = cam.create_still_configuration()
+        cam.configure(config)
+        cam.start()
+        
+        print("✅ Camera 0 connected successfully")
+        print("📸 Taking test capture...")
+        
+        # Capture test image
+        import time
+        time.sleep(2)  # Let camera stabilize
+        array = cam.capture_array()
+        print(f"✅ Captured image: {array.shape}, dtype: {array.dtype}")
+        
+        cam.stop()
+        print("🎉 Camera test completed successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Camera test failed: {e}")
+        return False
+
 def main():
-    """Main entry point"""
-    app = QApplication(sys.argv)
+    """Main entry point with fallback handling"""
+    print("🚀 Starting Efficient Dual IMX708 Camera Control...")
     
-    # Set application properties
-    app.setApplicationName("Efficient Dual IMX708 Camera Control")
-    app.setApplicationVersion("2.0.0")
+    # Check if Qt is available
+    if not QT_AVAILABLE:
+        print("❌ Qt not available for GUI mode")
+        install_qt_dependencies()
+        
+        # Offer CLI mode
+        print("\n" + "="*50)
+        response = input("Would you like to run camera test in CLI mode? (y/n): ")
+        if response.lower() in ['y', 'yes']:
+            success = run_cli_mode()
+            return 0 if success else 1
+        else:
+            print("Exiting. Install Qt dependencies and try again.")
+            return 1
     
-    # Create and show main window
-    window = EfficientDualCameraGUI()
-    window.show()
-    
-    return app.exec()
+    try:
+        # Try to create QApplication
+        app = QApplication(sys.argv)
+        print("✅ Qt Application created successfully")
+        
+        # Set application properties
+        app.setApplicationName("Efficient Dual IMX708 Camera Control")
+        app.setApplicationVersion("2.0.0")
+        
+        # Try different Qt platforms if the default fails
+        platforms_to_try = ['xcb', 'wayland', 'offscreen']
+        window = None
+        
+        for platform in platforms_to_try:
+            try:
+                if platform != os.environ.get('QT_QPA_PLATFORM'):
+                    print(f"🔄 Trying Qt platform: {platform}")
+                    os.environ['QT_QPA_PLATFORM'] = platform
+                    
+                # Create and show main window
+                window = EfficientDualCameraGUI()
+                window.show()
+                print(f"✅ GUI started successfully with platform: {platform}")
+                break
+                
+            except Exception as e:
+                print(f"❌ Failed with platform {platform}: {e}")
+                if window:
+                    try:
+                        window.close()
+                    except:
+                        pass
+                window = None
+                continue
+        
+        if window is None:
+            print("❌ Failed to start GUI with any Qt platform")
+            install_qt_dependencies()
+            return 1
+            
+        return app.exec()
+        
+    except Exception as e:
+        print(f"❌ Critical Qt error: {e}")
+        install_qt_dependencies()
+        
+        # Fallback to CLI mode
+        print("\n" + "="*50)
+        response = input("Would you like to run camera test in CLI mode? (y/n): ")
+        if response.lower() in ['y', 'yes']:
+            success = run_cli_mode()
+            return 0 if success else 1
+        else:
+            return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main()) 
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\n👋 Application interrupted by user")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n💥 Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1) 
