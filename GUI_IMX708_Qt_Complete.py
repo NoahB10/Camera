@@ -78,24 +78,27 @@ except ImportError as e:
 
 # Camera imports
 CAMERA_AVAILABLE = True
-QtGlPreview = None
+QGlPicamera2 = None
+QPicamera2 = None
 
 try:
     from picamera2 import Picamera2
     print("✅ Picamera2 imported successfully")
     
-    # Only import Qt preview if Qt is available
+    # Import proper Qt widgets if Qt is available
     if QT_AVAILABLE:
         try:
-            from picamera2.previews.qt import QtGlPreview
-            print("✅ QtGlPreview imported successfully")
+            from picamera2.previews.qt import QGlPicamera2, QPicamera2
+            print("✅ QGlPicamera2 and QPicamera2 imported successfully")
         except ImportError as e:
-            print(f"⚠️ QtGlPreview import failed: {e}")
-            print("Preview will use fallback mode")
-            QtGlPreview = None
+            print(f"⚠️ Picamera2 Qt widgets import failed: {e}")
+            print("Preview will use custom fallback mode")
+            QGlPicamera2 = None
+            QPicamera2 = None
     else:
-        print("⚠️ Qt not available - QtGlPreview disabled")
-        QtGlPreview = None
+        print("⚠️ Qt not available - Picamera2 Qt widgets disabled")
+        QGlPicamera2 = None
+        QPicamera2 = None
         
 except ImportError as e:
     print(f"❌ Picamera2 not available: {e}")
@@ -108,8 +111,15 @@ try:
     import imageio
     import cv2
     PROCESSING_AVAILABLE = True
+    print("✅ Image processing libraries available")
 except ImportError:
-    print("Some processing libraries not available")
+    print("⚠️ Some processing libraries not available")
+    try:
+        import cv2
+        print("✅ OpenCV available")
+    except ImportError:
+        print("❌ OpenCV not available - preview fallback disabled")
+        cv2 = None
     PROCESSING_AVAILABLE = False
 
 
@@ -279,7 +289,7 @@ class ParameterControl(QWidget):
 
 
 class EfficientDualCameraGUI(QMainWindow):
-    """Main Qt-based dual camera GUI with efficient QtGlPreview integration"""
+    """Main Qt-based dual camera GUI with proper QGlPicamera2/QPicamera2 widgets"""
     
     def __init__(self):
         super().__init__()
@@ -360,7 +370,7 @@ class EfficientDualCameraGUI(QMainWindow):
         
     def setup_ui(self):
         """Setup the main user interface"""
-        self.setWindowTitle("Efficient Dual IMX708 Camera Control with Qt Preview")
+        self.setWindowTitle("Efficient Dual IMX708 Camera Control with Picamera2 Qt Widgets")
         self.setGeometry(100, 100, 1600, 1000)
         
         # Central widget
@@ -610,7 +620,16 @@ class EfficientDualCameraGUI(QMainWindow):
         self.fps_combo = QComboBox()
         self.fps_combo.addItems(["0.5", "1", "2", "5", "10", "15", "30"])
         self.fps_combo.setCurrentText("5")
+        self.fps_combo.currentTextChanged.connect(self.on_fps_changed)
+        self.fps_combo.setToolTip("Preview refresh rate (only for fallback previews)")
         controls_layout.addWidget(self.fps_combo)
+        
+        # Preview toggle button (will be enabled only for fallback previews)
+        self.preview_toggle_btn = QPushButton("⏸️ Pause")
+        self.preview_toggle_btn.setMaximumWidth(80)
+        self.preview_toggle_btn.clicked.connect(self.toggle_preview)
+        self.preview_toggle_btn.setEnabled(False)  # Initially disabled
+        controls_layout.addWidget(self.preview_toggle_btn)
         
         controls_layout.addStretch()
         
@@ -698,16 +717,16 @@ class EfficientDualCameraGUI(QMainWindow):
         self.log_widget.log_message(message)
         
     def initialize_cameras(self):
-        """Initialize cameras with QtGlPreview integration or fallback"""
+        """Initialize cameras with proper QGlPicamera2/QPicamera2 widgets or fallback"""
         if not CAMERA_AVAILABLE:
             self.log_message("❌ Picamera2 not available - running in simulation mode")
             self.preview_status.setText("Simulation mode - No cameras")
             return
             
-        if QtGlPreview is None:
-            self.log_message("⚠️ QtGlPreview not available - initializing cameras without preview")
+        if QGlPicamera2 is None and QPicamera2 is None:
+            self.log_message("⚠️ Picamera2 Qt widgets not available - will use QLabel fallback")
         else:
-            self.log_message("🔄 Initializing cameras with Qt preview...")
+            self.log_message("🔄 Initializing cameras with proper Picamera2 Qt widgets...")
         
         try:
             # Initialize Camera 0
@@ -715,30 +734,52 @@ class EfficientDualCameraGUI(QMainWindow):
                 self.log_message("📷 Initializing Camera 0...")
                 self.cam0 = Picamera2(0)
                 
-                # Create Qt preview for camera 0 if available
-                if QtGlPreview is not None:
-                    try:
-                        self.preview0 = QtGlPreview(self.cam0)
-                        self.preview0.setMinimumSize(400, 300)
-                        self.log_message("✅ Camera 0: Qt preview created")
-                    except Exception as e:
-                        self.log_message(f"⚠️ Camera 0: Qt preview failed, continuing without: {e}")
-                        self.preview0 = None
-                else:
-                    self.preview0 = None
-                
-                # Configure camera
+                # Configure camera first
                 config0 = self.cam0.create_preview_configuration(
-                    main={"size": (1640, 1232)},
-                    buffer_count=3
+                    main={"size": (820, 616)},
+                    buffer_count=4
                 )
                 self.cam0.configure(config0)
+                
+                # Create proper Qt widget for camera 0
+                if QGlPicamera2 is not None:
+                    try:
+                        self.preview0 = QGlPicamera2(self.cam0, width=400, height=300, keep_ar=True)
+                        self.log_message("✅ Camera 0: QGlPicamera2 (hardware accelerated) created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 0: QGlPicamera2 failed, trying QPicamera2: {e}")
+                        if QPicamera2 is not None:
+                            try:
+                                self.preview0 = QPicamera2(self.cam0, width=400, height=300, keep_ar=True)
+                                self.log_message("✅ Camera 0: QPicamera2 (software) created")
+                            except Exception as e2:
+                                self.log_message(f"⚠️ Camera 0: QPicamera2 also failed, using QLabel: {e2}")
+                                self.preview0 = self.create_fallback_preview("Camera 0")
+                        else:
+                            self.preview0 = self.create_fallback_preview("Camera 0")
+                elif QPicamera2 is not None:
+                    try:
+                        self.preview0 = QPicamera2(self.cam0, width=400, height=300, keep_ar=True)
+                        self.log_message("✅ Camera 0: QPicamera2 (software) created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 0: QPicamera2 failed, using QLabel: {e}")
+                        self.preview0 = self.create_fallback_preview("Camera 0")
+                else:
+                    self.log_message("📺 Camera 0: Using QLabel fallback preview")
+                    self.preview0 = self.create_fallback_preview("Camera 0")
                 
                 # Start camera
                 self.cam0.start()
                 self.cam0_connected = True
                 
-                preview_msg = "with Qt preview" if self.preview0 else "without preview"
+                # Determine preview type
+                if hasattr(self.preview0, 'setPixmap'):
+                    preview_msg = "with QLabel fallback"
+                elif hasattr(self.preview0, '__class__') and 'QGl' in str(self.preview0.__class__):
+                    preview_msg = "with QGlPicamera2 (hardware)"
+                else:
+                    preview_msg = "with QPicamera2 (software)"
+                    
                 self.log_message(f"✅ Camera 0 initialized {preview_msg}")
                 
             except Exception as e:
@@ -751,30 +792,52 @@ class EfficientDualCameraGUI(QMainWindow):
                 self.log_message("📷 Initializing Camera 1...")
                 self.cam1 = Picamera2(1)
                 
-                # Create Qt preview for camera 1 if available
-                if QtGlPreview is not None:
-                    try:
-                        self.preview1 = QtGlPreview(self.cam1)
-                        self.preview1.setMinimumSize(400, 300)
-                        self.log_message("✅ Camera 1: Qt preview created")
-                    except Exception as e:
-                        self.log_message(f"⚠️ Camera 1: Qt preview failed, continuing without: {e}")
-                        self.preview1 = None
-                else:
-                    self.preview1 = None
-                
-                # Configure camera
+                # Configure camera first
                 config1 = self.cam1.create_preview_configuration(
-                    main={"size": (1640, 1232)},
-                    buffer_count=3
+                    main={"size": (820, 616)},
+                    buffer_count=4
                 )
                 self.cam1.configure(config1)
+                
+                # Create proper Qt widget for camera 1
+                if QGlPicamera2 is not None:
+                    try:
+                        self.preview1 = QGlPicamera2(self.cam1, width=400, height=300, keep_ar=True)
+                        self.log_message("✅ Camera 1: QGlPicamera2 (hardware accelerated) created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 1: QGlPicamera2 failed, trying QPicamera2: {e}")
+                        if QPicamera2 is not None:
+                            try:
+                                self.preview1 = QPicamera2(self.cam1, width=400, height=300, keep_ar=True)
+                                self.log_message("✅ Camera 1: QPicamera2 (software) created")
+                            except Exception as e2:
+                                self.log_message(f"⚠️ Camera 1: QPicamera2 also failed, using QLabel: {e2}")
+                                self.preview1 = self.create_fallback_preview("Camera 1")
+                        else:
+                            self.preview1 = self.create_fallback_preview("Camera 1")
+                elif QPicamera2 is not None:
+                    try:
+                        self.preview1 = QPicamera2(self.cam1, width=400, height=300, keep_ar=True)
+                        self.log_message("✅ Camera 1: QPicamera2 (software) created")
+                    except Exception as e:
+                        self.log_message(f"⚠️ Camera 1: QPicamera2 failed, using QLabel: {e}")
+                        self.preview1 = self.create_fallback_preview("Camera 1")
+                else:
+                    self.log_message("📺 Camera 1: Using QLabel fallback preview")
+                    self.preview1 = self.create_fallback_preview("Camera 1")
                 
                 # Start camera
                 self.cam1.start()
                 self.cam1_connected = True
                 
-                preview_msg = "with Qt preview" if self.preview1 else "without preview"
+                # Determine preview type
+                if hasattr(self.preview1, 'setPixmap'):
+                    preview_msg = "with QLabel fallback"
+                elif hasattr(self.preview1, '__class__') and 'QGl' in str(self.preview1.__class__):
+                    preview_msg = "with QGlPicamera2 (hardware)"
+                else:
+                    preview_msg = "with QPicamera2 (software)"
+                    
                 self.log_message(f"✅ Camera 1 initialized {preview_msg}")
                 
             except Exception as e:
@@ -784,6 +847,9 @@ class EfficientDualCameraGUI(QMainWindow):
                 
             # Setup preview layout
             self.setup_preview_widgets()
+            
+            # Start preview update timer if using fallback previews
+            self.start_fallback_preview_timer()
             
             # Apply initial settings
             self.apply_camera_settings()
@@ -796,6 +862,129 @@ class EfficientDualCameraGUI(QMainWindow):
             
         except Exception as e:
             self.log_message(f"❌ Camera initialization error: {e}")
+            
+    def create_fallback_preview(self, camera_name):
+        """Create a QLabel-based preview as fallback"""
+        preview_label = QLabel(f"{camera_name}\nPreview Loading...")
+        preview_label.setMinimumSize(400, 300)
+        preview_label.setAlignment(Qt.AlignCenter)
+        preview_label.setStyleSheet(
+            "border: 2px solid #4CAF50; "
+            "background-color: black; "
+            "color: white; "
+            "font-size: 12pt;"
+        )
+        preview_label.setScaledContents(True)
+        return preview_label
+        
+    def start_fallback_preview_timer(self):
+        """Start timer for QLabel-based preview updates (only if needed)"""
+        # Check if we have any QLabel fallback previews that need manual updates
+        has_fallback = False
+        
+        if self.preview0 and hasattr(self.preview0, 'setPixmap'):
+            has_fallback = True
+        if self.preview1 and hasattr(self.preview1, 'setPixmap'):
+            has_fallback = True
+            
+        if has_fallback:
+            self.log_message("📺 Starting fallback preview timer for QLabel widgets...")
+            self.preview_timer = QTimer()
+            self.preview_timer.timeout.connect(self.update_fallback_previews)
+            # Start with slower refresh rate for better performance
+            fps = float(self.fps_combo.currentText())
+            interval = int(1000 / max(fps, 0.5))  # Convert to milliseconds
+            self.preview_timer.start(interval)
+            
+            # Enable FPS controls for fallback previews
+            self.fps_combo.setEnabled(True)
+            self.preview_toggle_btn.setEnabled(True)
+            self.fps_combo.setToolTip("Control refresh rate for QLabel preview")
+            self.preview_toggle_btn.setToolTip("Pause/resume QLabel preview updates")
+        else:
+            self.log_message("✅ Using proper Qt widgets - no manual timer needed")
+            
+            # Disable FPS controls since Qt widgets handle their own refresh
+            self.fps_combo.setEnabled(False)
+            self.preview_toggle_btn.setEnabled(False)
+            self.fps_combo.setToolTip("FPS control not needed - Qt widgets handle their own refresh")
+            self.preview_toggle_btn.setToolTip("Pause/resume not needed - using proper Qt widgets")
+            
+    def update_fallback_previews(self):
+        """Update QLabel-based previews"""
+        try:
+            # Update Camera 0 preview
+            if (self.cam0_connected and self.preview0 and 
+                hasattr(self.preview0, 'setPixmap')):
+                try:
+                    array = self.cam0.capture_array()
+                    if array is not None:
+                        # Convert to QPixmap and display
+                        pixmap = self.array_to_qpixmap(array)
+                        if pixmap:
+                            self.preview0.setPixmap(pixmap)
+                except Exception as e:
+                    pass  # Silently ignore capture errors
+                    
+            # Update Camera 1 preview
+            if (self.cam1_connected and self.preview1 and 
+                hasattr(self.preview1, 'setPixmap')):
+                try:
+                    array = self.cam1.capture_array()
+                    if array is not None:
+                        # Convert to QPixmap and display
+                        pixmap = self.array_to_qpixmap(array)
+                        if pixmap:
+                            self.preview1.setPixmap(pixmap)
+                except Exception as e:
+                    pass  # Silently ignore capture errors
+                    
+        except Exception as e:
+            pass  # Silently ignore timer errors
+            
+    def array_to_qpixmap(self, array):
+        """Convert numpy array to QPixmap for display"""
+        try:
+            # Resize for better performance if OpenCV is available
+            height, width = array.shape[:2]
+            if width > 400 and cv2 is not None:
+                scale = 400.0 / width
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                array = cv2.resize(array, (new_width, new_height))
+            elif width > 400:
+                # Simple downsampling without OpenCV
+                step = width // 400
+                array = array[::step, ::step]
+            
+            # Ensure array is contiguous and the right type
+            array = np.ascontiguousarray(array, dtype=np.uint8)
+            
+            # Handle different array formats
+            if len(array.shape) == 3:
+                # Color image
+                if array.shape[2] == 3:
+                    # RGB
+                    h, w, ch = array.shape
+                    bytes_per_line = ch * w
+                    qt_image = QImage(array.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                elif array.shape[2] == 4:
+                    # RGBA
+                    h, w, ch = array.shape
+                    bytes_per_line = ch * w
+                    qt_image = QImage(array.data, w, h, bytes_per_line, QImage.Format_RGBA8888)
+                else:
+                    return None
+            else:
+                # Grayscale
+                h, w = array.shape
+                bytes_per_line = w
+                qt_image = QImage(array.data, w, h, bytes_per_line, QImage.Format_Grayscale8)
+            
+            return QPixmap.fromImage(qt_image)
+            
+        except Exception as e:
+            return None
             
     def setup_preview_widgets(self):
         """Setup the preview widgets in the container"""
@@ -849,15 +1038,65 @@ class EfficientDualCameraGUI(QMainWindow):
             layout.addWidget(placeholder)
             
         # Show preview status
-        if QtGlPreview is None:
-            status_msg = "Cameras initialized without Qt preview (QtGlPreview not available)"
-        elif not (self.preview0 or self.preview1):
+        if not (self.preview0 or self.preview1):
             status_msg = "Cameras connected - Preview disabled"
         else:
-            preview_count = sum([1 for p in [self.preview0, self.preview1] if p is not None])
-            status_msg = f"Hardware-accelerated preview active ({preview_count} camera(s))"
+            # Check preview types
+            hardware_count = 0
+            software_count = 0
+            fallback_count = 0
+            
+            for p in [self.preview0, self.preview1]:
+                if p is not None:
+                    if hasattr(p, 'setPixmap'):
+                        fallback_count += 1
+                    elif hasattr(p, '__class__') and 'QGl' in str(p.__class__):
+                        hardware_count += 1
+                    else:
+                        software_count += 1
+            
+            status_parts = []
+            if hardware_count > 0:
+                status_parts.append(f"{hardware_count} hardware")
+            if software_count > 0:
+                status_parts.append(f"{software_count} software")
+            if fallback_count > 0:
+                status_parts.append(f"{fallback_count} fallback")
+                
+            if len(status_parts) > 1:
+                status_msg = f"Mixed preview: {', '.join(status_parts)}"
+            elif hardware_count > 0:
+                status_msg = f"Hardware-accelerated preview active ({hardware_count} camera(s))"
+            elif software_count > 0:
+                status_msg = f"Software-rendered preview active ({software_count} camera(s))"
+            else:
+                status_msg = f"QLabel fallback preview active ({fallback_count} camera(s))"
             
         self.preview_status.setText(status_msg)
+        
+    def on_fps_changed(self, fps_text):
+        """Handle FPS combo box changes"""
+        try:
+            fps = float(fps_text)
+            if hasattr(self, 'preview_timer') and self.preview_timer is not None:
+                # Update timer interval
+                interval = int(1000 / max(fps, 0.5))
+                self.preview_timer.setInterval(interval)
+                self.log_message(f"📺 Preview FPS changed to {fps} ({interval}ms interval)")
+        except ValueError:
+            pass
+             
+    def toggle_preview(self):
+        """Toggle preview on/off"""
+        if hasattr(self, 'preview_timer') and self.preview_timer is not None:
+            if self.preview_timer.isActive():
+                self.preview_timer.stop()
+                self.preview_toggle_btn.setText("▶️ Resume")
+                self.log_message("⏸️ Preview paused")
+            else:
+                self.preview_timer.start()
+                self.preview_toggle_btn.setText("⏸️ Pause")
+                self.log_message("▶️ Preview resumed")
             
     def detect_focus_capabilities(self):
         """Detect and setup focus controls for cameras that support it"""
@@ -1267,6 +1506,11 @@ class EfficientDualCameraGUI(QMainWindow):
         """Reconnect cameras"""
         self.log_message("🔌 Reconnecting cameras...")
         
+        # Stop preview timer
+        if hasattr(self, 'preview_timer') and self.preview_timer is not None:
+            self.preview_timer.stop()
+            self.preview_timer = None
+        
         # Stop existing cameras
         if self.cam0:
             try:
@@ -1299,6 +1543,10 @@ class EfficientDualCameraGUI(QMainWindow):
         """Emergency stop all operations"""
         self.log_message("🛑 EMERGENCY STOP ACTIVATED")
         
+        # Stop preview timer
+        if hasattr(self, 'preview_timer') and self.preview_timer is not None:
+            self.preview_timer.stop()
+            
         try:
             if self.cam0:
                 self.cam0.stop()
@@ -1329,6 +1577,10 @@ class EfficientDualCameraGUI(QMainWindow):
     def closeEvent(self, event):
         """Handle application closing"""
         self.log_message("🔄 Shutting down application...")
+        
+        # Stop preview timer
+        if hasattr(self, 'preview_timer') and self.preview_timer is not None:
+            self.preview_timer.stop()
         
         # Save settings
         self.save_settings()
