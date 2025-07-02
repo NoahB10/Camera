@@ -3,20 +3,34 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "dual-imx708-camera-control"
-version = "1.2.0"
-description = "Dual IMX708 Camera Control GUI with distortion and perspective correction"
-readme = "README_UV.md"
-requires-python = ">=3.9"
-license = {text = "MIT"}
+name = "imx708-camera-gui"
+version = "2.0.0"
+description = "Efficient Dual IMX708 Camera Control GUI with PyQt5/Qt6 and Picamera2"
+readme = "README.md"
+license = {file = "LICENSE"}
 authors = [
-    {name = "Camera Control Team"}
+    {name = "Camera Control Team", email = "camera@example.com"},
 ]
-keywords = ["camera", "raspberry-pi", "image-processing", "gui", "distortion-correction"]
+maintainers = [
+    {name = "Camera Control Team", email = "camera@example.com"},
+]
+keywords = [
+    "camera",
+    "imx708", 
+    "picamera2",
+    "qt",
+    "pyqt5",
+    "raspberry-pi",
+    "computer-vision",
+    "photography",
+    "dual-camera",
+    "gui"
+]
 classifiers = [
     "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
+    "Environment :: X11 Applications :: Qt",
     "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
@@ -24,82 +38,306 @@ classifiers = [
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Capture :: Digital Camera",
     "Topic :: Scientific/Engineering :: Image Processing",
-    "Topic :: Multimedia :: Graphics :: Capture",
+    "Topic :: Software Development :: User Interfaces",
 ]
+requires-python = ">=3.8"
 
+# Core dependencies - essential for basic functionality
 dependencies = [
-    # Core GUI and camera
-    "picamera2>=0.3.0",
+    # Qt Framework (PyQt5 preferred for Picamera2 compatibility)
+    "PyQt5 >= 5.15.0, < 6.0.0",
     
-    # Image processing
-    "opencv-python>=4.5.0",
-    "numpy>=1.20.0",
-    "Pillow>=9.0.0",
-    "imageio>=2.19.0",
-    "rawpy>=0.18.0",
+    # Camera and image processing
+    "numpy >= 1.21.0",
+    "Pillow >= 8.0.0",
     
-    # Distortion correction
-    "discorpy>=1.5.0",
-    "scipy>=1.7.0",
-    "scikit-image>=0.18.0",
+    # OpenCV for image processing (headless version to avoid Qt conflicts)
+    "opencv-python-headless >= 4.5.0",
     
-    # Data handling and visualization
-    "pandas>=1.3.0",
-    "matplotlib>=3.3.0",
+    # Image I/O
+    "imageio >= 2.9.0",
     
-    # Performance optimization (optional but recommended)
-    "numba>=0.56.0",
+    # Scientific computing
+    "scipy >= 1.7.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=6.0",
-    "black>=22.0",
-    "isort>=5.0",
-    "flake8>=4.0",
+# Raspberry Pi specific dependencies
+rpi = [
+    "picamera2 >= 0.3.0",
+    "libcamera >= 0.0.5",
+    # Additional Pi-specific packages if needed
 ]
 
-rpi = [
-    # Additional Raspberry Pi specific dependencies if needed
-    "RPi.GPIO>=0.7.0",
+# Full image processing capabilities
+processing = [
+    "discorpy >= 1.5.0",  # Distortion correction
+    "matplotlib >= 3.5.0",  # Plotting and visualization
+    "scikit-image >= 0.19.0",  # Advanced image processing
+]
+
+# Development dependencies
+dev = [
+    # Code quality
+    "black >= 22.0.0",
+    "isort >= 5.10.0",
+    "flake8 >= 4.0.0",
+    "mypy >= 0.950",
+    
+    # Testing
+    "pytest >= 7.0.0",
+    "pytest-qt >= 4.0.0",
+    "pytest-cov >= 3.0.0",
+    
+    # Documentation
+    "sphinx >= 4.5.0",
+    "sphinx-qt-documentation >= 0.3.0",
+]
+
+# Alternative Qt backends
+qt6 = [
+    "PySide6 >= 6.2.0",
+    "PyQt6 >= 6.2.0",
+]
+
+# Complete installation with all features
+full = [
+    "imx708-camera-gui[rpi,processing,qt6]",
+]
+
+# Minimal installation for testing/simulation
+minimal = [
+    "PyQt5 >= 5.15.0",
+    "numpy >= 1.21.0",
+    "Pillow >= 8.0.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/dual-imx708-camera-control"
-Repository = "https://github.com/yourusername/dual-imx708-camera-control"
-Issues = "https://github.com/yourusername/dual-imx708-camera-control/issues"
+Homepage = "https://github.com/yourusername/imx708-camera-gui"
+Documentation = "https://imx708-camera-gui.readthedocs.io/"
+Repository = "https://github.com/yourusername/imx708-camera-gui.git"
+Issues = "https://github.com/yourusername/imx708-camera-gui/issues"
+Changelog = "https://github.com/yourusername/imx708-camera-gui/blob/main/CHANGELOG.md"
 
 [project.scripts]
-dual-camera-gui = "GUI_IMX708_Dirsotion_Correction_v1_2:main"
+# Main GUI application
+imx708-gui = "GUI_IMX708_Qt_Complete:main"
+imx708-camera = "GUI_IMX708_Qt_Complete:main"
+
+# Setup scripts
+setup-qt5-rpi = "setup_scripts:setup_qt5_rpi"
+
+[project.gui-scripts]
+# GUI application entries for desktop environments
+"IMX708 Camera GUI" = "GUI_IMX708_Qt_Complete:main"
+
+# Tool configurations
 
 [tool.uv]
+# UV specific configuration
 dev-dependencies = [
-    "pytest>=6.0",
-    "black>=22.0",
-    "isort>=5.0",
-    "flake8>=4.0",
+    "black >= 22.0.0",
+    "isort >= 5.10.0", 
+    "flake8 >= 4.0.0",
+    "mypy >= 0.950",
+    "pytest >= 7.0.0",
+    "pytest-qt >= 4.0.0",
 ]
 
+# UV workspace configuration
+[tool.uv.workspace]
+members = [
+    ".",
+]
+
+# Black code formatter
 [tool.black]
-line-length = 88
-target-version = ['py38']
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
 include = '\.pyi?$'
 extend-exclude = '''
 /(
-  # directories
+  # Exclude directories
   \.eggs
   | \.git
   | \.hg
   | \.mypy_cache
   | \.tox
   | \.venv
+  | _build
+  | buck-out
   | build
   | dist
 )/
 '''
 
+# isort import sorter
 [tool.isort]
 profile = "black"
+line_length = 100
 multi_line_output = 3
-line_length = 88 
+include_trailing_comma = true
+force_grid_wrap = 0
+use_parentheses = true
+ensure_newline_before_comments = true
+known_first_party = ["GUI_IMX708_Qt_Complete"]
+known_third_party = [
+    "PyQt5",
+    "PySide6", 
+    "picamera2",
+    "numpy",
+    "cv2",
+    "PIL",
+    "imageio",
+    "scipy",
+    "matplotlib",
+    "discorpy"
+]
+
+# MyPy type checker
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false  # Disabled for initial development
+disallow_incomplete_defs = false
+check_untyped_defs = true
+disallow_untyped_decorators = false
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+# Ignore missing imports for external libraries
+[[tool.mypy.overrides]]
+module = [
+    "picamera2.*",
+    "cv2.*",
+    "discorpy.*",
+    "imageio.*",
+]
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = [
+    "--strict-markers",
+    "--strict-config", 
+    "--cov=GUI_IMX708_Qt_Complete",
+    "--cov-report=html",
+    "--cov-report=term-missing",
+]
+testpaths = [
+    "tests",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "hardware: marks tests that require camera hardware",
+    "gui: marks tests that require GUI",
+]
+qt_api = "pyqt5"
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "setup_*.py",
+    "setup_*.sh",
+    "*/__pycache__/*",
+    "*/venv/*",
+    "*/env/*",
+    "*/.venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+]
+
+# Hatchling build configuration
+[tool.hatch.version]
+path = "GUI_IMX708_Qt_Complete.py"
+pattern = "VERSION = ['\"](?P<version>[^'\"]+)['\"]"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+    "GUI_IMX708_Qt_Complete.py",
+    "setup_qt5_rpi.sh",
+    "camera_settings*.json",
+    "distortion_coefficients*.json",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/GUI_IMX708_Qt_Complete.py",
+    "/setup_qt5_rpi.sh", 
+    "/README*.md",
+    "/LICENSE",
+    "/pyproject.toml",
+    "/tests/",
+]
+
+# Environment configurations for different use cases
+[tool.hatch.envs.default]
+dependencies = [
+    "pytest",
+    "pytest-qt",
+    "pytest-cov",
+]
+
+[tool.hatch.envs.rpi]
+extra-dependencies = [
+    "picamera2",
+    "libcamera",
+]
+
+[tool.hatch.envs.dev]
+extra-dependencies = [
+    "black",
+    "isort", 
+    "flake8",
+    "mypy",
+    "sphinx",
+]
+
+[tool.hatch.envs.full]
+extra-dependencies = [
+    "discorpy",
+    "matplotlib",
+    "scikit-image",
+    "PySide6",
+]
+
+# Environment variables for different configurations
+[tool.hatch.envs.default.env-vars]
+QT_QPA_PLATFORM_PLUGIN_PATH = ""
+OPENCV_VIDEOIO_PRIORITY_MSMF = "0"
+QT_LOGGING_RULES = "*.debug=false"
+
+[tool.hatch.envs.rpi.env-vars]
+QT_QPA_PLATFORM = "xcb"
+QT_XCB_GL_INTEGRATION = "none"
+QT_QUICK_BACKEND = "software"
+QT_AUTO_SCREEN_SCALE_FACTOR = "0"
+
+[tool.hatch.envs.headless.env-vars]
+QT_QPA_PLATFORM = "offscreen"
+DISPLAY = "" 
