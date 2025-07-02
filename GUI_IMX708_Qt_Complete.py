@@ -345,14 +345,13 @@ class EfficientDualCameraGUI(QMainWindow):
         
         layout.addWidget(self.focus_group)
         
-        # Processing controls
-        self.setup_processing_controls(layout)
-        
         layout.addStretch()
         parent.addWidget(left_widget)
         
-    def setup_processing_controls(self, parent_layout):
-        """Setup processing controls"""
+
+        
+    def setup_processing_controls_right(self, parent_layout):
+        """Setup processing controls for right panel"""
         processing_group = QGroupBox("Processing Controls")
         tab_widget = QTabWidget()
         
@@ -367,6 +366,10 @@ class EfficientDualCameraGUI(QMainWindow):
         self.distortion_checkbox = QCheckBox("Apply Radial Distortion Correction")
         self.distortion_checkbox.setChecked(self.processing_settings['enable_distortion_correction'])
         basic_layout.addWidget(self.distortion_checkbox)
+        
+        self.perspective_checkbox = QCheckBox("Enable Perspective Correction")
+        self.perspective_checkbox.setChecked(self.processing_settings['enable_perspective_correction'])
+        basic_layout.addWidget(self.perspective_checkbox)
         
         # Rotation controls
         rotation_group = QGroupBox("Image Rotation")
@@ -384,10 +387,129 @@ class EfficientDualCameraGUI(QMainWindow):
         left_rot_layout.addWidget(self.left_angle_spinbox)
         rotation_layout.addLayout(left_rot_layout)
         
+        # Right rotation
+        right_rot_layout = QHBoxLayout()
+        self.right_rotation_checkbox = QCheckBox("Right Image Rotation:")
+        self.right_rotation_checkbox.setChecked(self.processing_settings['apply_right_rotation'])
+        right_rot_layout.addWidget(self.right_rotation_checkbox)
+        
+        self.right_angle_spinbox = QDoubleSpinBox()
+        self.right_angle_spinbox.setRange(-180, 180)
+        self.right_angle_spinbox.setValue(self.processing_settings['right_rotation_angle'])
+        self.right_angle_spinbox.setSuffix("°")
+        right_rot_layout.addWidget(self.right_angle_spinbox)
+        rotation_layout.addLayout(right_rot_layout)
+        
         basic_layout.addWidget(rotation_group)
         basic_layout.addStretch()
         
         tab_widget.addTab(basic_tab, "Basic")
+        
+        # Padding tab
+        padding_tab = QWidget()
+        padding_layout = QVBoxLayout(padding_tab)
+        
+        info_label = QLabel("Distortion Correction Padding (pixels):")
+        info_label.setStyleSheet("font-weight: bold;")
+        padding_layout.addWidget(info_label)
+        
+        # Left camera padding
+        left_group = QGroupBox("Left Camera (cam0)")
+        left_layout = QHBoxLayout(left_group)
+        
+        left_layout.addWidget(QLabel("Top:"))
+        self.left_top_spinbox = QSpinBox()
+        self.left_top_spinbox.setRange(0, 500)
+        self.left_top_spinbox.setValue(self.processing_settings['left_top_padding'])
+        left_layout.addWidget(self.left_top_spinbox)
+        
+        left_layout.addWidget(QLabel("Bottom:"))
+        self.left_bottom_spinbox = QSpinBox()
+        self.left_bottom_spinbox.setRange(0, 500)
+        self.left_bottom_spinbox.setValue(self.processing_settings['left_bottom_padding'])
+        left_layout.addWidget(self.left_bottom_spinbox)
+        
+        padding_layout.addWidget(left_group)
+        
+        # Right camera padding
+        right_group = QGroupBox("Right Camera (cam1)")
+        right_layout = QHBoxLayout(right_group)
+        
+        right_layout.addWidget(QLabel("Top:"))
+        self.right_top_spinbox = QSpinBox()
+        self.right_top_spinbox.setRange(0, 500)
+        self.right_top_spinbox.setValue(self.processing_settings['right_top_padding'])
+        right_layout.addWidget(self.right_top_spinbox)
+        
+        right_layout.addWidget(QLabel("Bottom:"))
+        self.right_bottom_spinbox = QSpinBox()
+        self.right_bottom_spinbox.setRange(0, 500)
+        self.right_bottom_spinbox.setValue(self.processing_settings['right_bottom_padding'])
+        right_layout.addWidget(self.right_bottom_spinbox)
+        
+        padding_layout.addWidget(right_group)
+        padding_layout.addStretch()
+        
+        tab_widget.addTab(padding_tab, "Padding")
+        
+        # Crop tab
+        crop_tab = QWidget()
+        crop_layout = QVBoxLayout(crop_tab)
+        
+        crop_info_label = QLabel("Cropping Parameters:")
+        crop_info_label.setStyleSheet("font-weight: bold;")
+        crop_layout.addWidget(crop_info_label)
+        
+        # Left camera crop
+        left_crop_group = QGroupBox("Left Camera (cam0)")
+        left_crop_layout = QGridLayout(left_crop_group)
+        
+        left_crop_layout.addWidget(QLabel("Width:"), 0, 0)
+        self.left_width_spinbox = QSpinBox()
+        self.left_width_spinbox.setRange(100, 5000)
+        self.left_width_spinbox.setValue(self.processing_settings['crop_params']['cam0']['width'])
+        left_crop_layout.addWidget(self.left_width_spinbox, 0, 1)
+        
+        left_crop_layout.addWidget(QLabel("Start X:"), 1, 0)
+        self.left_start_x_spinbox = QSpinBox()
+        self.left_start_x_spinbox.setRange(0, 5000)
+        self.left_start_x_spinbox.setValue(self.processing_settings['crop_params']['cam0']['start_x'])
+        left_crop_layout.addWidget(self.left_start_x_spinbox, 1, 1)
+        
+        left_crop_layout.addWidget(QLabel("Height:"), 2, 0)
+        self.left_height_spinbox = QSpinBox()
+        self.left_height_spinbox.setRange(100, 5000)
+        self.left_height_spinbox.setValue(self.processing_settings['crop_params']['cam0']['height'])
+        left_crop_layout.addWidget(self.left_height_spinbox, 2, 1)
+        
+        crop_layout.addWidget(left_crop_group)
+        
+        # Right camera crop
+        right_crop_group = QGroupBox("Right Camera (cam1)")
+        right_crop_layout = QGridLayout(right_crop_group)
+        
+        right_crop_layout.addWidget(QLabel("Width:"), 0, 0)
+        self.right_width_spinbox = QSpinBox()
+        self.right_width_spinbox.setRange(100, 5000)
+        self.right_width_spinbox.setValue(self.processing_settings['crop_params']['cam1']['width'])
+        right_crop_layout.addWidget(self.right_width_spinbox, 0, 1)
+        
+        right_crop_layout.addWidget(QLabel("Start X:"), 1, 0)
+        self.right_start_x_spinbox = QSpinBox()
+        self.right_start_x_spinbox.setRange(0, 5000)
+        self.right_start_x_spinbox.setValue(self.processing_settings['crop_params']['cam1']['start_x'])
+        right_crop_layout.addWidget(self.right_start_x_spinbox, 1, 1)
+        
+        right_crop_layout.addWidget(QLabel("Height:"), 2, 0)
+        self.right_height_spinbox = QSpinBox()
+        self.right_height_spinbox.setRange(100, 5000)
+        self.right_height_spinbox.setValue(self.processing_settings['crop_params']['cam1']['height'])
+        right_crop_layout.addWidget(self.right_height_spinbox, 2, 1)
+        
+        crop_layout.addWidget(right_crop_group)
+        crop_layout.addStretch()
+        
+        tab_widget.addTab(crop_tab, "Crop")
         
         processing_layout = QVBoxLayout(processing_group)
         processing_layout.addWidget(tab_widget)
@@ -400,7 +522,7 @@ class EfficientDualCameraGUI(QMainWindow):
         
         # Preview area
         self.preview_container = QWidget()
-        self.preview_container.setMinimumSize(800, 600)
+        self.preview_container.setMinimumSize(800, 400)
         self.preview_container.setStyleSheet("background-color: #2a2a2a; border: 2px solid #555;")
         layout.addWidget(self.preview_container)
         
@@ -421,6 +543,16 @@ class EfficientDualCameraGUI(QMainWindow):
         controls_layout.addWidget(self.preview_status)
         
         layout.addLayout(controls_layout)
+        
+        # Activity Log (moved from right panel)
+        log_group = QGroupBox("Activity Log")
+        log_layout = QVBoxLayout(log_group)
+        
+        self.log_widget = LogWidget()
+        self.log_widget.setMaximumHeight(250)  # Slightly larger than before
+        log_layout.addWidget(self.log_widget)
+        
+        layout.addWidget(log_group)
         
         parent.addWidget(preview_widget)
         
@@ -479,14 +611,10 @@ class EfficientDualCameraGUI(QMainWindow):
         
         layout.addWidget(save_options_group)
         
-        # Log display
-        log_group = QGroupBox("Activity Log")
-        log_layout = QVBoxLayout(log_group)
+        # Processing controls (moved from left panel to below save options)
+        self.setup_processing_controls_right(layout)
         
-        self.log_widget = LogWidget()
-        log_layout.addWidget(self.log_widget)
-        
-        layout.addWidget(log_group)
+        layout.addStretch()
         
         parent.addWidget(right_widget)
         
