@@ -197,6 +197,14 @@ class ImageCropperTool:
         
         self.display_image_on_canvas()
     
+    def ctrl_pressed(self, event):
+        if not self.is_panning and not self.is_cropping:
+            self.canvas.config(cursor="fleur")  # Show pan cursor when Ctrl is held
+    
+    def ctrl_released(self, event):
+        if not self.is_panning and not self.is_cropping:
+            self.canvas.config(cursor="")  # Reset to default cursor
+    
     def handle_keypress(self, event):
         if not self.original_image:
             return
